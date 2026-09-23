@@ -26,7 +26,7 @@ The phone tracker shares location only while its page is active. Browsers may pa
    on conflict (user_id) do nothing;
    ```
 
-5. Copy `.env.example` to `.env` and fill in the project's URL, publishable/anon key, and **service-role secret**. The service-role secret is server-only. Never put it in browser code or commit `.env`.
+5. Copy `.env.example` to `.env` and fill in the project's URL, publishable/anon key, **service-role secret**, and a MapTiler API key. The service-role secret is server-only. Never put it in browser code or commit `.env`.
 
 ## 2. Run locally
 
@@ -36,7 +36,7 @@ In PowerShell:
 cd D:\aetrace
 npm install
 Copy-Item .env.example .env
-# Edit .env with the three Supabase values
+# Edit .env with your Supabase and MapTiler values
 npm run dev
 ```
 
@@ -49,10 +49,11 @@ The dashboard is at `http://127.0.0.1:3000/`; the phone page is at `http://127.0
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY` (server-only; do not mark as exposed to the browser)
+   - `MAPTILER_API_KEY` (map display key; restrict it to your local/deployed site origins in MapTiler)
 3. Redeploy after setting variables. Add the Vercel production and preview URLs to Supabase Auth's allowed redirect/site URL configuration.
 4. Open the deployed site and sign in with the Auth account that is listed in `app_admins`.
 
-The same-origin API uses Supabase service-role access only after it validates the supplied Auth JWT and checks administrator membership. Keep the service-role secret only in Vercel server environment settings and local `.env`. Supabase's publishable/anon key is delivered to the browser; database RLS still limits direct browser reads to authenticated administrators.
+The same-origin API uses Supabase service-role access only after it validates the supplied Auth JWT and checks administrator membership. Keep the service-role secret only in Vercel server environment settings and local `.env`. Supabase's publishable/anon key is delivered to the browser; database RLS still limits direct browser reads to authenticated administrators. MapTiler tiles use a browser-visible key, so restrict that key to the app's website origins.
 
 ## 4. Use the fleet dashboard
 
@@ -61,7 +62,7 @@ The same-origin API uses Supabase service-role access only after it validates th
 3. Leave the tracking page active for location updates. The dashboard receives device and location changes through Supabase Realtime.
 4. Use **History** to review up to 7 days at a time. Remove a device to revoke its credential and delete its location points.
 
-Locations older than 90 days are pruned as new location updates arrive. Audit entries remain after device removal. Restrict access to Supabase project settings and database credentials. Review employee notices, company policy, lawful basis, and applicable retention requirements before collecting location data.
+Locations older than 90 days are pruned as new location updates arrive. Audit entries remain after device removal. The map uses MapTiler's `streets-v4` raster tiles, with MapTiler and OpenStreetMap attribution; add the `MAPTILER_API_KEY` or the dashboard will explain that map tiles are not configured. Obtain a key from [MapTiler Cloud](https://cloud.maptiler.com/) and restrict it to your website origins. The app no longer requests basemap tiles from OpenStreetMap's volunteer tile server. Restrict access to Supabase project settings and database credentials. Review employee notices, company policy, lawful basis, and applicable retention requirements before collecting location data.
 
 ## Git and local configuration
 

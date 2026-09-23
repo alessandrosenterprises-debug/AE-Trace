@@ -18,18 +18,28 @@ const since = value => {
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
   return `${Math.floor(seconds / 86400)}d ago`;
 };
-let map, historyMap, devices = [], markers = new Map(), refreshTimer, toastTimer, realtimeChannel;
+let map, historyMap, mapTilerKey = null, devices = [], markers = new Map(), refreshTimer, toastTimer, realtimeChannel;
+function addBaseTiles(targetMap, noticeSelector) {
+  const notice=$(noticeSelector);
+  if(!mapTilerKey){notice.textContent='Map tiles need a MapTiler API key. Add MAPTILER_API_KEY to .env or the Vercel project settings.';notice.classList.remove('hidden');return;}
+  const tiles=L.tileLayer(`https://api.maptiler.com/maps/streets-v4/{z}/{x}/{y}.png?key=${encodeURIComponent(mapTilerKey)}`,{
+    tileSize:512,zoomOffset:-1,minZoom:1,maxZoom:20,attribution:'&copy; <a href="https://www.maptiler.com/copyright/" target="_blank" rel="noreferrer">MapTiler</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>',crossOrigin:true
+  });
+  tiles.on('tileerror',()=>{notice.textContent='Map tiles were rejected. Check the MapTiler key and its allowed website domains.';notice.classList.remove('hidden');});
+  tiles.on('tileload',()=>notice.classList.add('hidden'));
+  tiles.addTo(targetMap);
+}
 function showToast(message) { $('#toast').textContent = message; $('#toast').classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('show'), 2600); }
 function showDashboard(username) {
   $('#login').classList.add('hidden'); $('#dashboard').classList.remove('hidden'); $('#admin-name').textContent = username;
-  if (!map) { map = L.map('map').setView([-12.8, 28.2], 5); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map); }
+  if (!map) { map = L.map('map').setView([-12.8, 28.2], 5); addBaseTiles(map,'#map-notice'); }
   setTimeout(() => map.invalidateSize(), 100); loadAll(); connectSocket(); clearInterval(refreshTimer); refreshTimer = setInterval(loadAll, 12000);
 }
 async function boot() {
   try {
     const response=await fetch('/api/config'); const config=await response.json();
     if(!response.ok||!config.supabaseUrl||!config.supabaseAnonKey) throw new Error(config.error||'Supabase is not configured.');
-    supabase=createClient(config.supabaseUrl,config.supabaseAnonKey);
+    supabase=createClient(config.supabaseUrl,config.supabaseAnonKey);mapTilerKey=config.mapTilerKey;
     const {data:{session}}=await supabase.auth.getSession();
     if(!session){$('#login').classList.remove('hidden');return;}
     const me=await api('/api/me');showDashboard(me.username);
@@ -102,7 +112,7 @@ $('#devices').addEventListener('click',async event=>{
 });
 async function openHistory(device){
   $('#history-title').textContent=`${device.name} · location history`; $('#history-list').textContent='Loading…'; $('#history-dialog').showModal();
-  if(!historyMap){historyMap=L.map('history-map').setView([-12.8,28.2],5);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(historyMap);}
+  if(!historyMap){historyMap=L.map('history-map').setView([-12.8,28.2],5);addBaseTiles(historyMap,'#history-map-notice');}
   setTimeout(()=>historyMap.invalidateSize(),100);
   async function updateHistory(){
     try{const rows=await api(`/api/devices/${encodeURIComponent(device.id)}/history?hours=${$('#history-hours').value}`);$('#history-list').innerHTML=rows.length?rows.map(r=>`<div class="history-item">${esc(dateText(r.recordedAt))} · ${Number(r.latitude).toFixed(5)}, ${Number(r.longitude).toFixed(5)}${r.accuracy==null?'':` · ±${Math.round(r.accuracy)} m`}</div>`).join(''):'No location history for this period.';

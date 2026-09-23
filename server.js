@@ -12,7 +12,7 @@ app.use(helmet({ contentSecurityPolicy: { directives: {
   defaultSrc: ["'self'"], scriptSrc: ["'self'", 'https://unpkg.com', 'https://cdn.jsdelivr.net', 'https://esm.sh'],
   styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com', 'https://fonts.googleapis.com'],
   fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
-  imgSrc: ["'self'", 'data:', 'https://tile.openstreetmap.org'],
+  imgSrc: ["'self'", 'data:', 'https://api.maptiler.com'],
   connectSrc: ["'self'", 'https://*.supabase.co', 'wss://*.supabase.co'], objectSrc: ["'none'"]
 } } }));
 app.use(express.json({ limit: '32kb' }));
@@ -62,7 +62,7 @@ async function requireDevice(req, res, next) {
 }
 app.use('/api', needDatabase);
 app.get('/api/health', (_req, res) => res.json({ ok: true, timestamp: now() }));
-app.get('/api/config', (_req, res) => res.json({ supabaseUrl, supabaseAnonKey: anonKey }));
+app.get('/api/config', (_req, res) => res.json({ supabaseUrl, supabaseAnonKey: anonKey, mapTilerKey: process.env.MAPTILER_API_KEY || null }));
 app.get('/api/me', requireAdmin, (req, res) => res.json({ username: req.admin.email, id: req.admin.id }));
 app.post('/api/login-audit', requireAdmin, async (req, res) => {
   await audit(req.admin.email || req.admin.id, 'login');
