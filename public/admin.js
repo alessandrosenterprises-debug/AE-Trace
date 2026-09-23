@@ -37,8 +37,9 @@ async function boot() {
 }
 $('#login-form').addEventListener('submit', async event => {
   event.preventDefault(); $('#login-error').textContent = '';
-  const form = new FormData(event.currentTarget);
-  try { const {error}=await supabase.auth.signInWithPassword({email:form.get('email'),password:form.get('password')}); if(error)throw error; const me=await api('/api/me'); await api('/api/login-audit',{method:'POST',body:'{}'}); event.currentTarget.reset(); showDashboard(me.username); }
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
+  try { const {error}=await supabase.auth.signInWithPassword({email:form.get('email'),password:form.get('password')}); if(error)throw error; const me=await api('/api/me'); await api('/api/login-audit',{method:'POST',body:'{}'}); formElement.reset(); showDashboard(me.username); }
   catch (error) { await supabase.auth.signOut(); $('#login-error').textContent = error.message; }
 });
 $('#logout').addEventListener('click', async () => { try { await api('/api/logout', { method:'POST', body:'{}' }); } finally { await supabase.auth.signOut(); $('#dashboard').classList.add('hidden'); $('#login').classList.remove('hidden'); if (map) { map.remove(); map=null; markers.clear(); } } });
@@ -86,7 +87,8 @@ function connectSocket() {
 $('#new-enrollment').addEventListener('click',()=>{ $('#enroll-dialog').showModal(); $('#code-result').classList.add('hidden'); $('#enroll-error').textContent=''; });
 $('#enroll-form').addEventListener('submit',async event=>{
   event.preventDefault(); $('#enroll-error').textContent='';
-  try { const data=await api('/api/enrollments',{method:'POST',body:JSON.stringify({label:new FormData(event.currentTarget).get('label')})}); $('#enroll-code').textContent=data.code; $('#enroll-expiry').textContent=`Expires ${dateText(data.expiresAt)}`; $('#code-result').classList.remove('hidden'); event.currentTarget.reset(); loadAll(); }
+  const formElement=event.currentTarget;
+  try { const data=await api('/api/enrollments',{method:'POST',body:JSON.stringify({label:new FormData(formElement).get('label')})}); $('#enroll-code').textContent=data.code; $('#enroll-expiry').textContent=`Expires ${dateText(data.expiresAt)}`; $('#code-result').classList.remove('hidden'); formElement.reset(); loadAll(); }
   catch(error){$('#enroll-error').textContent=error.message;}
 });
 $('#copy-code').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('#enroll-code').textContent);showToast('Enrollment code copied');}catch{showToast('Select and copy the code manually');}});

@@ -16,9 +16,9 @@ async function init(){
  }catch{localStorage.removeItem(tokenKey);localStorage.removeItem(idKey);localStorage.removeItem(nameKey);}
 }
 $('#device-enroll').addEventListener('submit',async event=>{
- event.preventDefault();setError('');const form=new FormData(event.currentTarget);
+ event.preventDefault();setError('');const formElement=event.currentTarget;const form=new FormData(formElement);
  try{const response=await fetch('/api/enroll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:form.get('code'),name:form.get('name'),platform:form.get('platform')})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not enroll');
-  localStorage.setItem(tokenKey,data.deviceToken);localStorage.setItem(idKey,data.deviceId);localStorage.setItem(nameKey,data.name);event.currentTarget.reset();await init();
+  localStorage.setItem(tokenKey,data.deviceToken);localStorage.setItem(idKey,data.deviceId);localStorage.setItem(nameKey,data.name);formElement.reset();await init();
  }catch(error){setError(error.message);}
 });
 function startTracking(){
