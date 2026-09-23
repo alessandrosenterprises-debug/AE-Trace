@@ -22,7 +22,7 @@ let map, historyMap, devices = [], markers = new Map(), refreshTimer, toastTimer
 function showToast(message) { $('#toast').textContent = message; $('#toast').classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('show'), 2600); }
 function showDashboard(username) {
   $('#login').classList.add('hidden'); $('#dashboard').classList.remove('hidden'); $('#admin-name').textContent = username;
-  if (!map) { map = L.map('map').setView([-12.8, 28.2], 5); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map); }
+  if (!map) { map = L.map('map').setView([-12.8, 28.2], 5); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map); }
   setTimeout(() => map.invalidateSize(), 100); loadAll(); connectSocket(); clearInterval(refreshTimer); refreshTimer = setInterval(loadAll, 12000);
 }
 async function boot() {
@@ -102,7 +102,7 @@ $('#devices').addEventListener('click',async event=>{
 });
 async function openHistory(device){
   $('#history-title').textContent=`${device.name} · location history`; $('#history-list').textContent='Loading…'; $('#history-dialog').showModal();
-  if(!historyMap){historyMap=L.map('history-map').setView([-12.8,28.2],5);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(historyMap);}
+  if(!historyMap){historyMap=L.map('history-map').setView([-12.8,28.2],5);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'}).addTo(historyMap);}
   setTimeout(()=>historyMap.invalidateSize(),100);
   async function updateHistory(){
     try{const rows=await api(`/api/devices/${encodeURIComponent(device.id)}/history?hours=${$('#history-hours').value}`);$('#history-list').innerHTML=rows.length?rows.map(r=>`<div class="history-item">${esc(dateText(r.recordedAt))} · ${Number(r.latitude).toFixed(5)}, ${Number(r.longitude).toFixed(5)}${r.accuracy==null?'':` · ±${Math.round(r.accuracy)} m`}</div>`).join(''):'No location history for this period.';

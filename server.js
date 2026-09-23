@@ -12,7 +12,7 @@ app.use(helmet({ contentSecurityPolicy: { directives: {
   defaultSrc: ["'self'"], scriptSrc: ["'self'", 'https://unpkg.com', 'https://cdn.jsdelivr.net', 'https://esm.sh'],
   styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com', 'https://fonts.googleapis.com'],
   fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
-  imgSrc: ["'self'", 'data:', 'https://*.tile.openstreetmap.org'],
+  imgSrc: ["'self'", 'data:', 'https://tile.openstreetmap.org'],
   connectSrc: ["'self'", 'https://*.supabase.co', 'wss://*.supabase.co'], objectSrc: ["'none'"]
 } } }));
 app.use(express.json({ limit: '32kb' }));
