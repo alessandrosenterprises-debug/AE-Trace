@@ -1,0 +1,17 @@
+{
+  "name": "aetrace-fleet",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Authorized fleet location tracking MVP",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": { "node": ">=20.6" },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0"
+  }
+}
