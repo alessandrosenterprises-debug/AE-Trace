@@ -79,7 +79,10 @@ function renderMarkers() {
     present.add(d.id);
     const popup=`<b>${esc(d.name)}</b><br>${esc(d.status)} · battery ${d.battery==null?'—':`${d.battery}%`}<br><span>${esc(since(d.locationAt))}</span>`;
     if (markers.has(d.id)) markers.get(d.id).setLatLng([d.latitude,d.longitude]).setPopupContent(popup);
-    else markers.set(d.id,L.marker([d.latitude,d.longitude]).addTo(map).bindPopup(popup));
+    else {
+      const icon=L.divIcon({className:'device-marker',html:'',iconSize:[20,20],iconAnchor:[10,10],popupAnchor:[0,-11]});
+      markers.set(d.id,L.marker([d.latitude,d.longitude],{icon}).addTo(map).bindPopup(popup));
+    }
   }
   for (const [id,marker] of markers) if (!present.has(id)) { marker.remove(); markers.delete(id); }
   const points=devices.filter(d=>Number.isFinite(d.latitude)).map(d=>[d.latitude,d.longitude]);
