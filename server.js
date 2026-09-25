@@ -323,6 +323,24 @@ app.patch('/api/riders/:id',requireAdmin,async(req,res)=>{
     res.json({...data,fullName:data.full_name,staffCode:data.staff_code});
   }catch(error){return fail(res,error);}
 });
+app.delete('/api/riders/:id',requireAdmin,async(req,res)=>{
+  try{
+    const {data:rider,error:lookupError}=await db.from('riders').select('id,full_name,photo_path,devices(id)').eq('id',req.params.id).maybeSingle();
+    if(lookupError)return fail(res,lookupError);
+    if(!rider)return res.status(404).json({error:'Rider not found'});
+    const assignedDeviceCount=(rider.devices||[]).length;
+    const {data:deleted,error:deleteError}=await db.from('riders').delete().eq('id',rider.id).select('id').maybeSingle();
+    if(deleteError)return fail(res,deleteError);
+    if(!deleted)return res.status(404).json({error:'Rider not found'});
+    if(rider.photo_path){
+      const {error:photoError}=await db.storage.from('rider-photos').remove([rider.photo_path]);
+      if(photoError)console.error('Could not remove deleted rider photo',photoError.message);
+      else photoUrlCache.delete(rider.photo_path);
+    }
+    await audit(req.admin.email||req.admin.id,'rider_removed',null,{riderId:rider.id,name:rider.full_name,unassignedDeviceCount:assignedDeviceCount});
+    res.json({ok:true,unassignedDeviceCount:assignedDeviceCount});
+  }catch(error){return fail(res,error);}
+});
 app.patch('/api/devices/:id',requireAdmin,async(req,res)=>{
   try{
     const update={};
