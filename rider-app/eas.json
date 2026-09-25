@@ -11,13 +11,18 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://192.168.25.156:3000",
+        "EXPO_PUBLIC_API_URL": "https://ae-trace.vercel.app",
         "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
       }
     },
     "production": {
+      "environment": "production",
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://ae-trace.vercel.app",
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true"
       }
     }
   }
