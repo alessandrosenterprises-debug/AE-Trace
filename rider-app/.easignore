@@ -1,8 +1,30 @@
-# Use the project Git ignore rules, plus keep local credentials out of EAS archives.
+# Local configuration and credentials
 .env
 .env.*
 !.env.example
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+
+# Dependencies and generated build output
 node_modules/
 .expo/
 dist/
 web-build/
+.expo-shared/
+expo-env.d.ts
+*.tsbuildinfo
+
+# Operating system and logs
+.DS_Store
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.orig.*
+.kotlin/
+.metro-health-check*
+.git/

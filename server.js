@@ -361,6 +361,7 @@ app.patch('/api/devices/:id',requireAdmin,async(req,res)=>{
 // Vercel serves files in /public as CDN assets and does not run Express static
 // middleware there. Serve the dashboard document explicitly so GET / works
 // when the Express app is deployed as a Vercel Function.
+app.get('/ae-trace-emblem.png', (_req, res) => res.type('png').sendFile(path.join(__dirname, 'public', 'ae-trace-emblem.png')));
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 if (!process.env.VERCEL) app.use(express.static(path.join(__dirname, 'public'), { extensions:['html'] }));
