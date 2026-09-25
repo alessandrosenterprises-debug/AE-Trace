@@ -1,0 +1,8 @@
+# Use the project Git ignore rules, plus keep local credentials out of EAS archives.
+.env
+.env.*
+!.env.example
+node_modules/
+.expo/
+dist/
+web-build/
