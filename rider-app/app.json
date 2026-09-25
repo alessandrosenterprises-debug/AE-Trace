@@ -4,7 +4,7 @@
     "slug": "aetrace-rider",
     "owner": "sarjblendedit",
     "scheme": "aetracerider",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.aetrace.rider",
-      "versionCode": 2,
+      "versionCode": 3,
       "icon": "./assets/icon.png",
       "adaptiveIcon": {
         "backgroundColor": "#0B1220",

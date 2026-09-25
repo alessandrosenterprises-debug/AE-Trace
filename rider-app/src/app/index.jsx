@@ -12,7 +12,7 @@ import { startManagedLocationUpdates, stopManagedLocationUpdates } from '../serv
 
 const KEYS = { url: 'aetrace.apiUrl', token: 'aetrace.deviceToken', name: 'aetrace.deviceName', id: 'aetrace.deviceId' };
 const version = Constants.expoConfig?.version || '1.0.0';
-function resolveApiUrl(){const configured=process.env.EXPO_PUBLIC_API_URL||Constants.expoConfig?.extra?.apiBaseUrl;if(configured)return configured.trim().replace(/\/+$/,'');const hostUri=Constants.expoConfig?.hostUri||Constants.expoGoConfig?.debuggerHost;if(!hostUri)return'';const host=hostUri.replace(/^https?:\/\//,'').replace(/:\d+$/,'');return host?`http://${host}:3000`:'';}
+function resolveApiUrl(){const configured=process.env.EXPO_PUBLIC_API_URL||Constants.expoConfig?.extra?.apiBaseUrl;if(configured)return configured.trim().replace(/\/+$/,'');const hostUri=Constants.expoConfig?.hostUri||Constants.expoGoConfig?.debuggerHost;if(!hostUri)return'https://ae-trace.vercel.app';const host=hostUri.replace(/^https?:\/\//,'').replace(/:\d+$/,'');return host?`http://${host}:3000`:'https://ae-trace.vercel.app';}
 
 export default function RiderHome() {
   const insets = useSafeAreaInsets();
