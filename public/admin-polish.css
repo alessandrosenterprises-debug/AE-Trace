@@ -1,0 +1,27 @@
+/* Consistent brand baseline and readable navigation/header text. */
+.sidebar-brand{display:flex;align-items:center;gap:12px;min-height:78px;padding:8px 9px 18px;text-decoration:none;color:#eef4fc;line-height:1.15}
+.sidebar-brand .logo-image{display:block;flex:none;width:42px;height:42px;border-radius:12px;margin:0;object-fit:contain}
+.sidebar-brand>span{display:block;min-width:0;font:700 16px/1.2 Manrope,Arial,sans-serif;letter-spacing:-.025em;white-space:nowrap}
+.sidebar-brand>span small{display:block;margin-top:5px;color:#a8bad0;font:700 9px/1.2 'DM Sans',Arial,sans-serif;letter-spacing:.15em;white-space:nowrap}
+.breadcrumbs{color:#a9bad0;font-size:12px}
+.breadcrumbs b{color:#657995}
+.breadcrumbs strong{color:#f4f7fc;font-size:12px}
+.admin-topbar .live-indicator{color:#aef4df}
+.top-user{color:#d5dfed}
+.top-user #admin-name{font-weight:600;color:#f0f5fd}
+.admin-topbar .signout{color:#e3eaf5}
+.workspace-label,.nav-caption{color:#8b9bb2}
+.nav-item{color:#c1ccdb}
+.nav-item .nav-icon{color:#9aacc2}
+.settings-help{max-width:520px;color:#aab8cb;font-size:10px;line-height:1.55}
+.settings-controls{margin-top:13px}
+.settings-controls .settings-card form{padding-top:0}
+.settings-controls .settings-card label{max-width:520px}
+.settings-controls .form-error:empty{display:none}
+#page-bike-tracker .heading-actions{gap:9px}
+#page-bike-tracker .inline-control{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin:0;color:#afbdd0}
+#page-bike-tracker .inline-control input[type=date]{width:150px;margin:0;padding:8px 9px;font:11px 'DM Sans',Arial,sans-serif}
+#page-bike-tracker .table-wrap table{min-width:560px}
+#page-bike-tracker td strong{color:#9de9d0;font-size:11px}
+@media(max-width:760px){#page-bike-tracker .page-heading{flex-direction:column}#page-bike-tracker .heading-actions{justify-content:flex-start;flex-wrap:wrap}#page-bike-tracker .inline-control input[type=date]{width:145px}}
+@media(max-width:760px){.sidebar-brand{min-height:70px;padding-bottom:15px}.breadcrumbs{font-size:11px}.breadcrumbs strong{font-size:11px}}
