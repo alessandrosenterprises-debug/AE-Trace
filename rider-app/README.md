@@ -10,20 +10,20 @@ This native app enrolls authorized company phones with a one-time admin code and
    ```powershell
    cd D:\aetrace\rider-app
    npm install
-   npx expo start
+   Copy-Item .env.example .env
+   npx expo start -c
    ```
 
 3. Scan the QR code with Expo Go on Android. On iPhone, use the Camera app to open the link in Expo Go.
 4. In AE-Trace admin, choose **Generate one-time code**. The admin generator only creates a code; it does not ask for a rider or device label. Codes are single use and expire after 30 minutes.
-5. The app connection is configured by the administrator before previewing or distributing the app. For a deployed backend, set `EXPO_PUBLIC_API_URL` to the AE-Trace HTTPS URL in the Expo app environment and restart Expo. For a LAN preview, run the backend on `0.0.0.0`; Expo Go can infer the computer's LAN name when it is on the same network. Riders never enter a server address.
+5. The project `.env` configures the preview to use `https://ae-trace.vercel.app`. Keep this HTTPS production URL for Expo Go. A private `192.168.x.x` address is only for a deliberate same-Wi-Fi development setup, and Android blocks plain HTTP by default. Riders never enter a server address.
 6. The rider enters the one-time code, full names, store/branch, and phone number. Submitting the code creates their rider profile and registers the phone automatically. The app collects the phone model, OS, AE-Trace version and battery level. The rider can optionally pick a square profile image; it is resized and uploaded to private storage, then a short-lived image URL is shown beside their name on the fleet map. The rider acknowledges the location notice and grants the operating system's location permissions. Tracking begins automatically after enrollment; there are no in-app pause, stop, or remove controls.
 
 Use a deployed Vercel HTTPS URL or a secure tunnel for a local backend. A phone's `localhost` points to the phone itself. When using a LAN preview, both devices need the same network, the API must bind to `0.0.0.0`, and the server's port must be reachable. Set `EXPO_PUBLIC_API_URL` for production builds; this is build-time app configuration, not a rider-entered setting.
 
-For example, from PowerShell before starting Expo:
+After changing `.env`, restart Expo with its cache cleared:
 
 ```powershell
-$env:EXPO_PUBLIC_API_URL = "https://your-ae-trace-deployment.vercel.app"
 npx expo start -c
 ```
 
