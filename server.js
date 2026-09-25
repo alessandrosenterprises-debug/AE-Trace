@@ -340,6 +340,11 @@ app.patch('/api/devices/:id',requireAdmin,async(req,res)=>{
   }catch(error){return fail(res,error);}
 });
 
+// Vercel serves files in /public as CDN assets and does not run Express static
+// middleware there. Serve the dashboard document explicitly so GET / works
+// when the Express app is deployed as a Vercel Function.
+app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
 if (!process.env.VERCEL) app.use(express.static(path.join(__dirname, 'public'), { extensions:['html'] }));
 app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ error:'Internal server error' }); });
 
