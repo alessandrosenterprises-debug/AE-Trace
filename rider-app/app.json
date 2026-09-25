@@ -4,7 +4,7 @@
     "slug": "aetrace-rider",
     "owner": "sarjblendedit",
     "scheme": "aetracerider",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -13,10 +13,10 @@
     },
     "android": {
       "package": "com.aetrace.rider",
-      "versionCode": 3,
+      "versionCode": 4,
       "icon": "./assets/icon.png",
       "adaptiveIcon": {
-        "backgroundColor": "#0B1220",
+        "backgroundColor": "#031441",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
@@ -59,6 +59,11 @@
       "eas": {
         "projectId": "543ab36d-5b4b-4788-bef9-c5f98883dc24"
       }
+    },
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#031441"
     }
   }
 }

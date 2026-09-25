@@ -12,7 +12,7 @@ import { startManagedLocationUpdates, stopManagedLocationUpdates } from '../serv
 
 const KEYS = { url: 'aetrace.apiUrl', token: 'aetrace.deviceToken', name: 'aetrace.deviceName', id: 'aetrace.deviceId' };
 const version = Constants.expoConfig?.version || '1.0.0';
-function resolveApiUrl(){const configured=process.env.EXPO_PUBLIC_API_URL||Constants.expoConfig?.extra?.apiBaseUrl;if(configured)return configured.trim().replace(/\/+$/,'');const hostUri=Constants.expoConfig?.hostUri||Constants.expoGoConfig?.debuggerHost;if(!hostUri)return'https://ae-trace.vercel.app';const host=hostUri.replace(/^https?:\/\//,'').replace(/:\d+$/,'');return host?`http://${host}:3000`:'https://ae-trace.vercel.app';}
+function resolveApiUrl(){const configured=process.env.EXPO_PUBLIC_API_URL||Constants.expoConfig?.extra?.apiBaseUrl||'https://ae-trace.vercel.app';return configured.trim().replace(/\/+$/,'');}
 
 export default function RiderHome() {
   const insets = useSafeAreaInsets();
@@ -46,7 +46,7 @@ export default function RiderHome() {
     try {
       response = await fetch(`${cleanUrl(base)}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }, body: JSON.stringify(body), signal: controller.signal });
     } catch (error) {
-      if (error.name === 'AbortError') throw new Error('AE-Trace did not respond. Check that the backend is running and your phone is on the same Wi-Fi network.');
+      if (error.name === 'AbortError') throw new Error('The AE-Trace server did not respond. Check the phone’s internet connection and try again.');
       throw new Error(`Could not connect to AE-Trace. Check the backend address and network connection. ${error.message || ''}`.trim());
     } finally { clearTimeout(timeout); }
     const result = await response.json().catch(() => ({}));
@@ -58,8 +58,9 @@ export default function RiderHome() {
     (async () => {
       try {
         const [savedUrl, savedToken, savedName, savedId] = await Promise.all(Object.values(KEYS).map(key => SecureStore.getItemAsync(key)));
-        const serviceUrl=resolveApiUrl()||savedUrl||'';
+        const serviceUrl=resolveApiUrl();
         setApiUrl(serviceUrl);
+        if(savedToken&&savedUrl!==serviceUrl)await SecureStore.setItemAsync(KEYS.url,serviceUrl).catch(()=>{});
         if (savedToken) {
           setToken(savedToken); setDeviceName(savedName || Device.deviceName || Device.modelName || 'Rider phone'); setDeviceId(savedId || '');
           if(serviceUrl){try{const response=await fetch(`${cleanUrl(serviceUrl)}/api/device/profile`,{headers:{Authorization:`Bearer ${savedToken}`}});if(response.ok){const profile=await response.json();if(profile.rider?.avatarUrl)setAvatarUrl(profile.rider.avatarUrl);if(profile.rider?.fullName)setEnrolledFullName(profile.rider.fullName);if(profile.rider?.store)setStore(profile.rider.store);if(profile.rider?.phone)setPhone(profile.rider.phone);}}catch{/* Keep the saved device ready for retry when offline. */}}
