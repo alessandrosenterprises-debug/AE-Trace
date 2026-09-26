@@ -88,7 +88,7 @@ if (!TaskManager.isTaskDefined(LOCATION_TASK)) {
   });
 }
 
-export async function startManagedLocationUpdates(intervalSeconds = 15) {
+export async function startManagedLocationUpdates(intervalSeconds = 5) {
   const foreground = await Location.getForegroundPermissionsAsync();
   const foregroundPermission = foreground.status === 'granted' ? foreground : await Location.requestForegroundPermissionsAsync();
   if (foregroundPermission.status !== 'granted') return { status: 'permission-needed', detail: 'Allow location access in the phone settings to share this company phone location.' };
@@ -96,20 +96,18 @@ export async function startManagedLocationUpdates(intervalSeconds = 15) {
   const background = await Location.getBackgroundPermissionsAsync();
   const backgroundPermission = background.status === 'granted' ? background : await Location.requestBackgroundPermissionsAsync();
   if (backgroundPermission.status !== 'granted') return { status: 'foreground-only', detail: 'Background location is not enabled. This phone shares location only while AE-Trace is open.' };
-  if (!(await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK))) {
-    await Location.startLocationUpdatesAsync(LOCATION_TASK, {
-      accuracy: Location.Accuracy.Balanced,
-      distanceInterval: 20,
-      timeInterval: Math.max(15000, Math.min(300000, intervalSeconds * 1000)),
-      pausesUpdatesAutomatically: false,
-      showsBackgroundLocationIndicator: true,
-      foregroundService: {
-        notificationTitle: 'AE-Trace location sharing is active',
-        notificationBody: 'This company phone is sharing its location with the fleet administrator.',
-        notificationColor: '#65dcb9',
-        killServiceOnDestroy: false,
-      },
-    });
-  }
+  await Location.startLocationUpdatesAsync(LOCATION_TASK, {
+    accuracy: Location.Accuracy.High,
+    distanceInterval: 0,
+    timeInterval: Math.max(5000, Math.min(300000, intervalSeconds * 1000)),
+    pausesUpdatesAutomatically: false,
+    showsBackgroundLocationIndicator: true,
+    foregroundService: {
+      notificationTitle: 'AE-Trace location sharing is active',
+      notificationBody: 'This company phone is sharing its location with the fleet administrator.',
+      notificationColor: '#65dcb9',
+      killServiceOnDestroy: false,
+    },
+  });
   return { status: 'active', detail: 'Continuous location sharing is active on this enrolled company phone.' };
 }

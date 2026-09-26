@@ -4,7 +4,7 @@
     "slug": "aetrace-rider",
     "owner": "sarjblendedit",
     "scheme": "aetracerider",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.aetrace.rider",
-      "versionCode": 6,
+      "versionCode": 7,
       "icon": "./assets/icon.png",
       "adaptiveIcon": {
         "backgroundColor": "#031441",
@@ -25,7 +25,8 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_LOCATION"
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
       ]
     },
     "web": {

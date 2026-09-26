@@ -109,8 +109,8 @@ export default function RiderHome() {
     let active = true;
     (async () => {
       try {
-        let intervalSeconds=15;
-        try { const config=await fetch(`${cleanUrl(apiUrl)}/api/device/settings`,{headers:{Authorization:`Bearer ${token}`}});if(config.ok){const policy=await config.json();if(Number.isInteger(policy.locationIntervalSeconds))intervalSeconds=Math.max(15,Math.min(300,policy.locationIntervalSeconds));} } catch { /* Continue with the safe 15-second default when policy is unavailable. */ }
+        let intervalSeconds=5;
+        try { const config=await fetch(`${cleanUrl(apiUrl)}/api/device/settings`,{headers:{Authorization:`Bearer ${token}`}});if(config.ok){const policy=await config.json();if(Number.isInteger(policy.locationIntervalSeconds))intervalSeconds=Math.max(5,Math.min(300,policy.locationIntervalSeconds));} } catch { /* Continue with the 5-second default when policy is unavailable. */ }
         const result = await startManagedLocationUpdates(intervalSeconds);
         if (!active) return;
         setTrackingStatus(result.status);
@@ -119,7 +119,7 @@ export default function RiderHome() {
         const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         await sendLocation(current);
         if (result.status !== 'active') {
-          watch.current = await Location.watchPositionAsync({ accuracy: Location.Accuracy.Balanced, distanceInterval: 25, timeInterval: intervalSeconds * 1000 }, position => { if (active) sendLocation(position).catch(error => { if ([401, 423].includes(error.status)) { watch.current?.remove(); watch.current = null; stopManagedLocationUpdates(); setTrackingStatus('admin-managed'); setTrackingDetail('Your fleet administrator has disabled tracking for this device.'); } setMessage(error.message); }); });
+          watch.current = await Location.watchPositionAsync({ accuracy: Location.Accuracy.High, distanceInterval: 0, timeInterval: intervalSeconds * 1000 }, position => { if (active) sendLocation(position).catch(error => { if ([401, 423].includes(error.status)) { watch.current?.remove(); watch.current = null; stopManagedLocationUpdates(); setTrackingStatus('admin-managed'); setTrackingDetail('Your fleet administrator has disabled tracking for this device.'); } setMessage(error.message); }); });
         }
         timer.current = setInterval(async () => {
           try { const level = await Battery.getBatteryLevelAsync().catch(() => -1); await request('/api/device/heartbeat', { battery: level >= 0 ? Math.round(level * 100) : null, deviceModel: Device.modelName || Device.deviceName || 'Unknown', appVersion: version }); }

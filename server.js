@@ -111,12 +111,12 @@ app.get('/api/me', requireAdmin, (req, res) => {
 app.get('/api/settings', requireAdmin, async (_req, res) => {
   const { data, error } = await db.from('fleet_settings').select('*').eq('id', 1).maybeSingle();
   if (error) return fail(res, error, 'Could not load fleet settings');
-  res.json(data || { id: 1, offline_after_minutes: 2, low_battery_percent: 20, stale_location_minutes: 30, location_interval_seconds: 15 });
+  res.json(data || { id: 1, offline_after_minutes: 2, low_battery_percent: 20, stale_location_minutes: 30, location_interval_seconds: 5 });
 });
 app.patch('/api/settings', requireAdmin, async (req, res) => {
   const input = req.body || {};
   const integerSetting = (key, min, max) => Number.isInteger(input[key]) && input[key] >= min && input[key] <= max;
-  if (!integerSetting('offline_after_minutes', 1, 60) || !integerSetting('low_battery_percent', 5, 50) || !integerSetting('stale_location_minutes', 5, 240) || !integerSetting('location_interval_seconds', 15, 300)) return res.status(400).json({ error: 'Settings are outside the allowed ranges.' });
+  if (!integerSetting('offline_after_minutes', 1, 60) || !integerSetting('low_battery_percent', 5, 50) || !integerSetting('stale_location_minutes', 5, 240) || !integerSetting('location_interval_seconds', 5, 300)) return res.status(400).json({ error: 'Settings are outside the allowed ranges.' });
   const updated = { id: 1, offline_after_minutes: input.offline_after_minutes, low_battery_percent: input.low_battery_percent, stale_location_minutes: input.stale_location_minutes, location_interval_seconds: input.location_interval_seconds, updated_by: req.admin.id, updated_at: now() };
   const { data, error } = await db.from('fleet_settings').upsert(updated).select('*').single();
   if (error) return fail(res, error, 'Could not save fleet settings');
@@ -179,7 +179,7 @@ app.get('/api/device/profile', requireDevice, async (req, res) => {
 app.get('/api/device/settings', requireDevice, requireActiveRider, async (_req, res) => {
   const { data, error } = await db.from('fleet_settings').select('location_interval_seconds').eq('id', 1).maybeSingle();
   if (error) return fail(res, error, 'Could not load tracking settings');
-  res.json({ locationIntervalSeconds: data?.location_interval_seconds || 15 });
+  res.json({ locationIntervalSeconds: data?.location_interval_seconds || 5 });
 });
 app.post('/api/device/heartbeat', requireDevice, requireActiveRider, async (req, res) => {
   try {
