@@ -52,13 +52,14 @@ function parseDelimited(text) {
 function parseNumber(value) {
   if (value == null || String(value).trim() === '') return null;
   const normalized = String(value).replace(/,/g, '').trim();
-  const parsed = Number(normalized.replace(/^[^0-9.+-]+/, ''));
+  const match = normalized.match(/[-+]?\d+(?:\.\d+)?/);
+  const parsed = match ? Number(match[0]) : NaN;
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
 function parseValue(value) {
   const raw = String(value || '').trim().replace(/,/g, '');
-  const match = raw.match(/^([^0-9.+-]*)([-+]?\d+(?:\.\d+)?)$/);
+  const match = raw.match(/^(.*?)([-+]?\d+(?:\.\d+)?)\s*$/);
   if (!match) return { currency: raw ? null : null, amount: raw ? NaN : null };
   return { currency: match[1].trim() || 'K', amount: Number(match[2]) };
 }
@@ -74,13 +75,17 @@ function rowsFromPaste(text) {
     driverName: ['drivername', 'ridername', 'driver', 'rider'], status: ['status'], value: ['value', 'amount'],
     mbd: ['mbd'], valid: ['valid', 'validity'],
   };
-  const positions = Object.fromEntries(Object.entries(aliases).map(([key, names]) => [key, headers.findIndex(header => names.includes(header))]));
-  if (positions.orderNo < 0) throw new Error('Could not find the Order No column in the pasted header row.');
-  return matrix.slice(1).filter(cells => cells.some(cell => cell !== '')).map(cells => {
+  const hasHeader = headers.some(header => aliases.orderNo.includes(header));
+  const positions = hasHeader
+    ? Object.fromEntries(Object.entries(aliases).map(([key, names]) => [key, headers.findIndex(header => names.includes(header))]))
+    : { orderNo: 0, date: 1, time: 2, customerName: 3, source: 4, store: 5, driverName: 6, status: 7, value: 8, mbd: 9, valid: 10 };
+  if (!hasHeader && matrix[0].length < 11) throw new Error('Include the header row, or paste tab-separated rows with all 11 expected columns.');
+  const dataRows = hasHeader ? matrix.slice(1) : matrix;
+  return dataRows.filter(cells => cells.some(value => value !== '')).map((cells, rowIndex) => {
     const get = key => positions[key] < 0 ? '' : (cells[positions[key]] || '').trim();
     const value = parseValue(get('value'));
     const mbd = parseNumber(get('mbd'));
-    if (Number.isNaN(value.amount) || Number.isNaN(mbd)) throw new Error(`Check the Value and MBD cells on order ${get('orderNo') || '(unknown)'}.`);
+    if (Number.isNaN(value.amount) || Number.isNaN(mbd)) throw new Error(`Row ${rowIndex + 1} (order ${get('orderNo') || '(unknown)'}): could not read Value “${get('value')}” or MBD “${get('mbd')}”.`);
     return { orderNo: get('orderNo'), date: get('date') || null, time: get('time') || null, customerName: get('customerName') || null, source: get('source') || null, store: get('store') || null, driverName: get('driverName') || null, status: get('status') || null, valueCurrency: value.currency, valueAmount: value.amount, mbd, valid: get('valid') || null };
   });
 }
@@ -192,6 +197,10 @@ async function boot() {
     $('#delivery-signout').addEventListener('click', async () => { await supabase.auth.signOut(); window.location.assign('/'); });
     $('#delivery-refresh').addEventListener('click', loadOrders);
     $('#data-sheet-refresh').addEventListener('click', loadOrders);
+    $('#delivery-paste').addEventListener('input', () => {
+      previewRows = []; $('#import-paste').disabled = true;
+      $('#paste-feedback').textContent = 'Preview your updated rows before importing.'; $('#paste-feedback').style.color = '';
+    });
     $('#preview-paste').addEventListener('click', () => {
       try {
         previewRows = rowsFromPaste($('#delivery-paste').value);
