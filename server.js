@@ -281,10 +281,17 @@ app.get('/api/delivery-report/orders', requireAdmin, async (req, res) => {
   try {
     const limit = Math.max(1, Math.min(5000, Number(req.query.limit) || 2000));
     const { data, error } = await db.from('delivery_report_orders').select('*').order('delivery_date', { ascending: false, nullsFirst: false }).order('id', { ascending: false }).limit(limit);
-    if (error) return fail(res, error, 'Could not load delivery report data');
+    if (error) return deliveryReportFail(res, error, 'Could not load delivery report data');
     res.json(data.map(row => ({ id: row.id, orderNo: row.order_no, date: row.delivery_date, time: row.delivery_time, customerName: row.customer_name, source: row.source, store: row.store, driverName: row.driver_name, status: row.status, valueCurrency: row.value_currency, valueAmount: row.value_amount, mbd: row.mbd, valid: row.valid, createdAt: row.created_at })));
-  } catch (error) { return fail(res, error, 'Could not load delivery report data'); }
+  } catch (error) { return deliveryReportFail(res, error, 'Could not load delivery report data'); }
 });
+function deliveryReportFail(res, error, message) {
+  if (error?.code === 'PGRST205' || error?.code === '42P01') {
+    console.error(`${message}: delivery_report_orders table is missing; apply supabase/migrations/202609270001_delivery_report.sql`);
+    return res.status(503).json({ error: 'Delivery Report database setup is incomplete. Ask an administrator to apply the latest Supabase database migration, then try again.' });
+  }
+  return fail(res, error, message);
+}
 app.post('/api/delivery-report/orders/import', requireAdmin, async (req, res) => {
   try {
     const rows = req.body?.rows;
@@ -304,10 +311,10 @@ app.post('/api/delivery-report/orders/import', requireAdmin, async (req, res) =>
       imported.push({ order_no: orderNo, delivery_date: date, delivery_time: clean(row.time, 20), customer_name: clean(row.customerName, 160), source: clean(row.source, 120), store: clean(row.store, 160), driver_name: clean(row.driverName, 160), status: clean(row.status, 60), value_currency: clean(row.valueCurrency, 8), value_amount: amount, mbd, valid: clean(row.valid, 30), created_by: req.admin.id });
     }
     const { data, error } = await db.from('delivery_report_orders').insert(imported).select('id');
-    if (error) return fail(res, error, 'Could not import delivery report data');
+    if (error) return deliveryReportFail(res, error, 'Could not import delivery report data');
     await audit(req.admin.email || req.admin.id, 'delivery_report_imported', null, { rowCount: data.length });
     res.status(201).json({ imported: data.length });
-  } catch (error) { return fail(res, error, 'Could not import delivery report data'); }
+  } catch (error) { return deliveryReportFail(res, error, 'Could not import delivery report data'); }
 });
 app.get('/api/reports/bike-tracker', requireAdmin, async (req, res) => {
   const from = req.query.from;
