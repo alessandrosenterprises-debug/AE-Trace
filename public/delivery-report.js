@@ -241,6 +241,7 @@ function renderRiderReport() {
   }
   const byStore = new Map();
   for (const entry of assignedRiders) {
+    if (!orderGroups.has(normalizedName(entry.riderName))) continue;
     const store = entry.homeStore.trim();
     const key = normalizedName(store);
     if (!byStore.has(key)) byStore.set(key, { store, riders: [] });
@@ -291,16 +292,17 @@ function renderRiderReport() {
 
 function renderStoreTargets() {
   const month = $('#store-target-month')?.value || $('#rider-report-month')?.value || monthNow();
+  const workedRiderKeys = new Set(riderMonthRows().map(row => normalizedName(row.driverName)));
   const stores = new Map();
   for (const rider of riderRoster.filter(entry => entry.riderName?.trim() && entry.homeStore?.trim())) {
     const key = normalizedName(rider.homeStore);
     if (!stores.has(key)) stores.set(key, { name: rider.homeStore, riders: [] });
-    stores.get(key).riders.push(rider);
+    if (workedRiderKeys.has(normalizedName(rider.riderName))) stores.get(key).riders.push(rider);
   }
   for (const saved of storeTargets.values()) if (!stores.has(normalizedName(saved.storeName))) stores.set(normalizedName(saved.storeName), { name: saved.storeName, riders: [] });
   const rows = [...stores.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name));
   $('#target-store-count').textContent = rows.filter(([, group]) => group.riders.length).length.toLocaleString();
-  $('#target-rider-count').textContent = riderRoster.filter(entry => entry.riderName?.trim() && entry.homeStore?.trim()).length.toLocaleString();
+  $('#target-rider-count').textContent = [...workedRiderKeys].filter(key => riderRoster.some(entry => normalizedName(entry.riderName) === key && entry.homeStore?.trim())).length.toLocaleString();
   const total = rows.reduce((sum, [key]) => sum + (storeTargets.get(key)?.target || 0), 0);
   const setCount = rows.filter(([key]) => storeTargets.get(key)?.target != null).length;
   $('#target-total').textContent = setCount ? total.toLocaleString() : 'Set targets';
@@ -309,7 +311,7 @@ function renderStoreTargets() {
   $('#store-target-rows').innerHTML = rows.length ? rows.map(([key, group]) => {
     const assigned = [...group.riders].sort((a, b) => a.riderName.localeCompare(b.riderName));
     const target = storeTargets.get(key)?.target;
-    const allocation = target == null ? 'Set target first' : !assigned.length ? 'No riders assigned' : (() => {
+    const allocation = target == null ? 'Set target first' : !assigned.length ? 'No riders worked this month' : (() => {
       const base = Math.floor(target / assigned.length), remainder = target % assigned.length;
       return assigned.map((rider, index) => `${esc(rider.riderName)}: ${base + (index < remainder ? 1 : 0)}`).join(' · ');
     })();
