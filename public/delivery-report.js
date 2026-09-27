@@ -5,7 +5,9 @@ let supabase;
 let orders = [];
 let previewRows = [];
 let riderMonthData = [];
-let riderTargets = new Map();
+let riderRoster = [];
+let storeTargets = new Map();
+let pendingTargetStores = new Set();
 let riderTargetMonth = '';
 let riderDataMonth = '';
 let riderMonthManuallySelected = false;
@@ -16,6 +18,7 @@ const money = (currency, amount) => amount == null || amount === '' ? '—' : `$
 const num = value => Number(value || 0);
 const delivered = row => /delivered/i.test(row.status || '');
 const valid = row => /^(yes|true|valid|1)$/i.test(String(row.valid || '').trim());
+const normalizedName = value => String(value || '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
 const api = async (url, options = {}) => {
   const { data: { session } = {} } = await supabase.auth.getSession();
   const response = await fetch(url, { ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}), ...(options.headers || {}) } });
@@ -52,6 +55,28 @@ function parseDelimited(text) {
   row.push(cell.trim());
   if (row.some(value => value !== '')) rows.push(row);
   return rows;
+}
+
+function rosterRowsFromPaste(text) {
+  const matrix = parseDelimited(text);
+  if (!matrix.length) throw new Error('Paste rider names and their home stores.');
+  const normalize = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const headers = matrix[0].map(normalize);
+  const nameAliases = ['ridername', 'rider', 'name', 'names', 'fullname', 'fullnames'];
+  const storeAliases = ['homestore', 'store', 'storebelongto', 'site', 'branch'];
+  const nameIndex = headers.findIndex(value => nameAliases.includes(value));
+  const storeIndex = headers.findIndex(value => storeAliases.includes(value));
+  const hasHeader = nameIndex >= 0 && storeIndex >= 0;
+  const data = hasHeader ? matrix.slice(1) : matrix;
+  const positions = hasHeader ? [nameIndex, storeIndex] : [0, 1];
+  const riders = data.filter(row => row.some(value => value.trim())).map((row, index) => {
+    const riderName = (row[positions[0]] || '').trim();
+    const homeStore = (row[positions[1]] || '').trim();
+    if (!riderName || !homeStore) throw new Error(`Roster row ${index + 1}: include both a rider name and a home store.`);
+    return { riderName, homeStore };
+  });
+  if (!riders.length) throw new Error('Paste at least one rider and home store.');
+  return riders;
 }
 
 function parseNumber(value) {
@@ -105,6 +130,8 @@ function setActiveView(name) {
   $('#delivery-scrim').classList.remove('show');
   history.replaceState(null, '', `#${name}`);
   if (name === 'data-sheet') renderSheet();
+  if (name === 'store-targets') renderStoreTargets();
+  if (name === 'rider-roster') renderRiderRoster();
 }
 
 function totalByCurrency(rows) {
@@ -165,7 +192,8 @@ function riderMonthRows() {
 }
 
 function riderComment(stats, target) {
-  if (target == null) return 'Set a monthly target to generate a performance comment.';
+  if (!stats.listed) return 'Add this rider to the Rider Roster and assign a home store.';
+  if (target == null) return 'Set a monthly target for this rider’s home store.';
   const achievement = target === 0 ? (stats.achieved > 0 ? 1 : 0) : stats.achieved / target;
   const quality = stats.onTimeRate != null && stats.onTimeRate >= 0.8 && stats.invalid <= 2;
   if (achievement >= 1 && quality) return 'Outstanding performance — target achieved with good on-time and controlled invalids.';
@@ -178,48 +206,97 @@ function riderComment(stats, target) {
 
 function renderRiderReport() {
   const month = $('#rider-report-month')?.value || monthNow();
-  const rows = riderMonthRows();
-  const groups = new Map();
-  for (const row of rows) {
-    const name = row.driverName.trim();
-    if (!groups.has(name)) groups.set(name, []);
-    groups.get(name).push(row);
+  const assignedRiders = riderRoster.filter(entry => entry.riderName?.trim() && entry.homeStore?.trim());
+  const orderGroups = new Map();
+  for (const row of riderMonthRows()) {
+    const key = normalizedName(row.driverName);
+    if (!orderGroups.has(key)) orderGroups.set(key, { name: row.driverName.trim(), items: [] });
+    orderGroups.get(key).items.push(row);
   }
-  const riders = [...groups].map(([name, items]) => {
+  const byStore = new Map();
+  for (const entry of assignedRiders) {
+    const store = entry.homeStore.trim();
+    const key = normalizedName(store);
+    if (!byStore.has(key)) byStore.set(key, { store, riders: [] });
+    byStore.get(key).riders.push(entry);
+  }
+  for (const group of byStore.values()) group.riders.sort((a, b) => a.riderName.localeCompare(b.riderName));
+  const allocated = new Map();
+  for (const [key, group] of byStore) {
+    const storeTarget = storeTargets.get(key)?.target;
+    if (storeTarget == null || !group.riders.length) continue;
+    const base = Math.floor(storeTarget / group.riders.length);
+    const remainder = storeTarget % group.riders.length;
+    group.riders.forEach((rider, index) => allocated.set(normalizedName(rider.riderName), { target: base + (index < remainder ? 1 : 0), store: group.store }));
+  }
+  const riderRecords = assignedRiders.map(entry => ({ key: normalizedName(entry.riderName), name: entry.riderName, store: entry.homeStore, listed: true }));
+  for (const [key, group] of orderGroups) if (!assignedRiders.some(entry => normalizedName(entry.riderName) === key)) riderRecords.push({ key, name: group.name, store: 'Not in Rider Roster', listed: false });
+  const riders = riderRecords.map(entry => {
+    const items = orderGroups.get(entry.key)?.items || [];
     const validCount = items.filter(valid).length;
     const invalidCount = items.filter(row => /^(no|false|invalid|0)$/i.test(String(row.valid || '').trim())).length;
     const withMbd = items.filter(row => row.mbd != null && row.mbd !== '' && Number.isFinite(Number(row.mbd)));
     const onTime = withMbd.filter(row => Number(row.mbd) >= 0).length;
-    const stores = [...new Set(items.map(row => row.store?.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-    const target = riderTargets.has(name) ? Number(riderTargets.get(name)) : null;
-    const stats = { name, items, stores, achieved: items.length, valid: validCount, invalid: invalidCount, onTime, onTimeCount: withMbd.length, onTimeRate: withMbd.length ? onTime / withMbd.length : null, target };
+    const target = allocated.get(entry.key)?.target ?? null;
+    const stats = { name: entry.name, store: entry.store, listed: entry.listed, items, achieved: items.length, valid: validCount, invalid: invalidCount, onTime, onTimeCount: withMbd.length, onTimeRate: withMbd.length ? onTime / withMbd.length : null, target };
     stats.balance = target == null ? null : target - stats.achieved;
     stats.comment = riderComment(stats, target);
     return stats;
   }).sort((a, b) => b.achieved - a.achieved || (b.target ? b.achieved / b.target : 0) - (a.target ? a.achieved / a.target : 0) || a.name.localeCompare(b.name));
   const totalTarget = riders.reduce((sum, rider) => sum + (rider.target || 0), 0);
+  const targetedRiders = riders.filter(rider => rider.target != null).length;
   const totalAchieved = riders.reduce((sum, rider) => sum + rider.achieved, 0);
   const totalOnTime = riders.reduce((sum, rider) => sum + rider.onTime, 0);
   const totalWithMbd = riders.reduce((sum, rider) => sum + rider.onTimeCount, 0);
-  $('#rider-stat-count').textContent = riders.length.toLocaleString();
-  $('#rider-stat-target').textContent = riders.some(rider => rider.target != null) ? totalTarget.toLocaleString() : 'Set targets';
-  $('#rider-stat-target-note').textContent = `${riders.filter(rider => rider.target != null).length} of ${riders.length} riders have a target`;
+  $('#rider-stat-count').textContent = assignedRiders.length.toLocaleString();
+  $('#rider-stat-target').textContent = targetedRiders ? totalTarget.toLocaleString() : 'Set store targets';
+  $('#rider-stat-target-note').textContent = `${targetedRiders} of ${assignedRiders.length} roster riders have an allocated target`;
   $('#rider-stat-achieved').textContent = totalAchieved.toLocaleString();
   $('#rider-stat-ontime').textContent = totalWithMbd ? `${Math.round(totalOnTime / totalWithMbd * 100)}%` : '—';
   $('#rider-report-period').textContent = new Date(`${month}-01T00:00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }).toUpperCase();
   const champion = riders[0];
   $('#rider-champion-name').textContent = champion?.name || 'No rider data yet';
-  $('#rider-champion-detail').textContent = champion ? `${champion.stores.join(', ') || 'Store not specified'} · ${champion.target == null ? 'Target not set' : `${champion.achieved} of ${champion.target} deliveries`} · ${champion.onTimeRate == null ? 'On-time data unavailable' : `${Math.round(champion.onTimeRate * 100)}% on-time`}` : 'Import monthly delivery rows to see the top performer.';
+  $('#rider-champion-detail').textContent = champion ? `${champion.store} · ${champion.target == null ? 'Store target not set' : `${champion.achieved} of ${champion.target} deliveries`} · ${champion.onTimeRate == null ? 'On-time data unavailable' : `${Math.round(champion.onTimeRate * 100)}% on-time`}` : 'Add riders to the Rider Roster to see the month’s top performer.';
   $('#rider-champion-score').textContent = champion ? champion.achieved.toLocaleString() : '—';
-  $('#rider-report-rows').innerHTML = riders.length ? riders.map((rider, index) => `<tr><td><span class="rider-rank ${index < 3 ? 'top-rank' : ''}">${index + 1}</span></td><td><strong>${esc(rider.name)}</strong></td><td>${esc(rider.stores.join(', ') || '—')}</td><td><input class="rider-target" type="number" min="1" max="100000" step="1" inputmode="numeric" aria-label="${esc(`Monthly target for ${rider.name}`)}" data-rider="${esc(rider.name)}" value="${rider.target == null ? '' : esc(rider.target)}" placeholder="Set target"></td><td><b>${rider.achieved.toLocaleString()}</b></td><td>${rider.valid.toLocaleString()}</td><td>${rider.invalid.toLocaleString()}</td><td><span class="rider-rate ${rider.onTimeRate != null && rider.onTimeRate < .8 ? 'rate-low' : ''}">${rider.onTimeRate == null ? '—' : `${Math.round(rider.onTimeRate * 100)}%`}</span></td><td>${rider.balance == null ? '—' : `<span class="balance-value ${rider.balance < 0 ? 'balance-ahead' : rider.balance > 0 ? 'balance-behind' : ''}">${rider.balance > 0 ? '+' : ''}${rider.balance.toLocaleString()}</span>`}</td><td class="rider-comment">${esc(rider.comment)}</td></tr>`).join('') : emptyRow(10, `No dated rider orders for ${esc($('#rider-report-period').textContent)}. Import rows with a Date and Driver Name in the Data Sheet.`);
+  $('#rider-report-rows').innerHTML = riders.length ? riders.map((rider, index) => `<tr><td><span class="rider-rank ${index < 3 ? 'top-rank' : ''}">${index + 1}</span></td><td><strong>${esc(rider.name)}</strong></td><td class="${rider.listed ? '' : 'unlisted-rider'}">${esc(rider.store || '—')}</td><td>${rider.target == null ? '—' : rider.target.toLocaleString()}</td><td><b>${rider.achieved.toLocaleString()}</b></td><td>${rider.valid.toLocaleString()}</td><td>${rider.invalid.toLocaleString()}</td><td><span class="rider-rate ${rider.onTimeRate != null && rider.onTimeRate < .8 ? 'rate-low' : ''}">${rider.onTimeRate == null ? '—' : `${Math.round(rider.onTimeRate * 100)}%`}</span></td><td>${rider.balance == null ? '—' : `<span class="balance-value ${rider.balance < 0 ? 'balance-ahead' : rider.balance > 0 ? 'balance-behind' : ''}">${rider.balance > 0 ? '+' : ''}${rider.balance.toLocaleString()}</span>`}</td><td class="rider-comment">${esc(rider.comment)}</td></tr>`).join('') : emptyRow(10, 'Add riders and their home stores in the Rider Roster to build this report.');
+  renderStoreTargets();
 }
 
-async function loadRiderTargets() {
+function renderStoreTargets() {
+  const month = $('#store-target-month')?.value || $('#rider-report-month')?.value || monthNow();
+  const stores = new Map();
+  for (const rider of riderRoster.filter(entry => entry.riderName?.trim() && entry.homeStore?.trim())) {
+    const key = normalizedName(rider.homeStore);
+    if (!stores.has(key)) stores.set(key, { name: rider.homeStore, riders: [] });
+    stores.get(key).riders.push(rider);
+  }
+  for (const saved of storeTargets.values()) if (!stores.has(normalizedName(saved.storeName))) stores.set(normalizedName(saved.storeName), { name: saved.storeName, riders: [] });
+  const rows = [...stores.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name));
+  $('#target-store-count').textContent = rows.filter(([, group]) => group.riders.length).length.toLocaleString();
+  $('#target-rider-count').textContent = riderRoster.filter(entry => entry.riderName?.trim() && entry.homeStore?.trim()).length.toLocaleString();
+  const total = rows.reduce((sum, [key]) => sum + (storeTargets.get(key)?.target || 0), 0);
+  const setCount = rows.filter(([key]) => storeTargets.get(key)?.target != null).length;
+  $('#target-total').textContent = setCount ? total.toLocaleString() : 'Set targets';
+  $('#target-store-note').textContent = `${setCount} of ${rows.length} listed stores have a target`;
+  $('#target-month-label').textContent = new Date(`${month}-01T00:00:00`).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+  $('#store-target-rows').innerHTML = rows.length ? rows.map(([key, group]) => {
+    const assigned = [...group.riders].sort((a, b) => a.riderName.localeCompare(b.riderName));
+    const target = storeTargets.get(key)?.target;
+    const allocation = target == null ? 'Set target first' : !assigned.length ? 'No riders assigned' : (() => {
+      const base = Math.floor(target / assigned.length), remainder = target % assigned.length;
+      return assigned.map((rider, index) => `${esc(rider.riderName)}: ${base + (index < remainder ? 1 : 0)}`).join(' · ');
+    })();
+    return `<tr><td><strong>${esc(group.name)}</strong></td><td>${assigned.length}</td><td><input class="store-target-input" type="number" min="1" max="1000000" step="1" inputmode="numeric" aria-label="${esc(`Monthly target for ${group.name}`)}" data-store="${esc(group.name)}" value="${target == null ? '' : esc(target)}" placeholder="Set target"></td><td class="allocation-text">${allocation}</td></tr>`;
+  }).join('') : emptyRow(4, 'Add rider-to-store assignments in the Rider Roster to list stores here.');
+}
+
+async function loadStoreTargets() {
   const month = $('#rider-report-month').value;
-  if (riderTargetMonth === month) { renderRiderReport(); return; }
+  if (riderTargetMonth === month) { renderStoreTargets(); return; }
   riderTargetMonth = month;
-  riderTargets = new Map((await api(`/api/delivery-report/rider-targets?month=${encodeURIComponent(month)}`)).map(item => [item.riderName, item.target]));
-  renderRiderReport();
+  storeTargets = new Map((await api(`/api/delivery-report/store-targets?month=${encodeURIComponent(month)}`)).map(item => [normalizedName(item.storeName), { storeName: item.storeName, target: item.target }]));
+  if ($('#rider-report-month').value !== month) return;
+  renderStoreTargets(); renderRiderReport();
 }
 
 async function loadRiderReportData() {
@@ -234,7 +311,34 @@ async function loadRiderReportData() {
 }
 
 async function loadRiderMonth() {
-  await Promise.all([loadRiderTargets(), loadRiderReportData()]);
+  await Promise.all([loadStoreTargets(), loadRiderReportData()]);
+}
+
+async function selectReportMonth(month) {
+  if (!month) return;
+  $('#rider-report-month').value = month;
+  $('#store-target-month').value = month;
+  riderMonthManuallySelected = true;
+  pendingTargetStores.clear();
+  riderTargetMonth = '';
+  riderDataMonth = '';
+  await loadRiderMonth();
+}
+
+async function loadRiderRoster() {
+  riderRoster = await api('/api/delivery-report/rider-roster');
+  renderRiderRoster();
+  renderStoreTargets();
+  renderRiderReport();
+}
+
+function renderRiderRoster() {
+  $('#roster-count').textContent = riderRoster.length.toLocaleString();
+  $('#rider-roster-rows').innerHTML = riderRoster.length ? riderRoster.map((rider, index) => `<tr data-roster-index="${index}" data-original-name="${esc(rider.riderName)}"><td><input class="roster-name-input" aria-label="Rider name" value="${esc(rider.riderName)}" maxlength="160"></td><td><input class="roster-store-input" aria-label="Home store" value="${esc(rider.homeStore)}" maxlength="160" list="roster-store-options"></td><td><button class="remove-roster-row" data-remove-roster="${index}" aria-label="Remove ${esc(rider.riderName)}">Remove</button></td></tr>`).join('') : emptyRow(3, 'No rider assignments yet. Add riders or paste a two-column roster above.');
+  const stores = [...new Set(riderRoster.map(rider => rider.homeStore.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  let options = document.querySelector('#roster-store-options');
+  if (!options) { options = document.createElement('datalist'); options.id = 'roster-store-options'; document.body.append(options); }
+  options.innerHTML = stores.map(store => `<option value="${esc(store)}"></option>`).join('');
 }
 
 function renderOverview() {
@@ -262,7 +366,11 @@ async function loadOrders() {
     const selectedMonth = $('#rider-report-month')?.value;
     if (!riderMonthManuallySelected && selectedMonth && !orders.some(row => row.date?.slice(0, 7) === selectedMonth)) {
       const latestMonth = orders.find(row => row.date)?.date.slice(0, 7);
-      if (latestMonth) { $('#rider-report-month').value = latestMonth; riderTargetMonth = ''; }
+      if (latestMonth) {
+        $('#rider-report-month').value = latestMonth;
+        $('#store-target-month').value = latestMonth;
+        riderTargetMonth = '';
+      }
     }
     riderDataMonth = '';
     renderAll();
@@ -287,7 +395,9 @@ async function boot() {
     $('#delivery-app').classList.remove('hidden');
     document.querySelectorAll('.delivery-nav button').forEach(button => button.addEventListener('click', () => setActiveView(button.dataset.view)));
     document.addEventListener('click', event => {
-      if (event.target.closest('[data-open-sheet]') || event.target.closest('[data-go-view="data-sheet"]')) { setActiveView('data-sheet'); return; }
+      const goView = event.target.closest('[data-go-view]');
+      if (event.target.closest('[data-open-sheet]')) { setActiveView('data-sheet'); return; }
+      if (goView) { setActiveView(goView.dataset.goView); return; }
       if (event.target.closest('#delivery-menu')) { $('#delivery-sidebar').classList.toggle('open'); $('#delivery-scrim').classList.toggle('show'); return; }
       if (event.target.id === 'delivery-scrim') { $('#delivery-sidebar').classList.remove('open'); $('#delivery-scrim').classList.remove('show'); }
     });
@@ -295,46 +405,99 @@ async function boot() {
     $('#delivery-refresh').addEventListener('click', loadOrders);
     $('#data-sheet-refresh').addEventListener('click', loadOrders);
     $('#rider-report-month').value = monthNow();
-    $('#rider-report-month').addEventListener('change', async () => {
-      riderMonthManuallySelected = true;
-      riderTargetMonth = '';
-      riderDataMonth = '';
-      try { await loadRiderMonth(); } catch (error) { showToast(error.message); }
+    $('#store-target-month').value = monthNow();
+    $('#rider-report-month').addEventListener('change', async event => {
+      try { await selectReportMonth(event.currentTarget.value); } catch (error) { showToast(error.message); }
     });
-    $('#save-rider-targets').addEventListener('click', async event => {
+    $('#store-target-month').addEventListener('change', async event => {
+      try { await selectReportMonth(event.currentTarget.value); } catch (error) { showToast(error.message); }
+    });
+    $('#save-store-targets').addEventListener('click', async event => {
       const button = event.currentTarget;
       const targets = [];
-      for (const input of document.querySelectorAll('.rider-target')) {
+      for (const input of document.querySelectorAll('.store-target-input')) {
         const value = input.value.trim();
-        if (value === '') { targets.push({ riderName: input.dataset.rider, target: null }); continue; }
+        if (value === '') {
+          if (pendingTargetStores.has(normalizedName(input.dataset.store))) { showToast(`Enter a monthly target for ${input.dataset.store} before saving.`); input.focus(); return; }
+          targets.push({ storeName: input.dataset.store, target: null }); continue;
+        }
         const target = Number(value);
-        if (!Number.isInteger(target) || target < 1 || target > 100000) { showToast(`Enter a whole-number target from 1 to 100,000 for ${input.dataset.rider}.`); input.focus(); return; }
-        targets.push({ riderName: input.dataset.rider, target });
+        if (!Number.isInteger(target) || target < 1 || target > 1000000) { showToast(`Enter a whole-number target from 1 to 1,000,000 for ${input.dataset.store}.`); input.focus(); return; }
+        targets.push({ storeName: input.dataset.store, target });
       }
       button.disabled = true; button.textContent = 'Saving…';
       try {
-        const result = await api('/api/delivery-report/rider-targets', { method: 'PUT', body: JSON.stringify({ month: $('#rider-report-month').value, targets }) });
-        riderTargetMonth = ''; await loadRiderTargets();
-        showToast(`${result.saved} targets saved${result.cleared ? `, ${result.cleared} cleared` : ''} for ${$('#rider-report-month').value}.`);
+        const result = await api('/api/delivery-report/store-targets', { method: 'PUT', body: JSON.stringify({ month: $('#store-target-month').value, targets }) });
+        pendingTargetStores.clear(); riderTargetMonth = ''; await loadStoreTargets();
+        showToast(`${result.saved} store targets saved${result.cleared ? `, ${result.cleared} cleared` : ''}.`);
       } catch (error) { showToast(error.message); }
       finally { button.disabled = false; button.textContent = 'Save targets'; }
     });
+    $('#add-target-store').addEventListener('click', () => {
+      const input = $('#new-target-store');
+      const storeName = input.value.trim();
+      if (!storeName) { showToast('Enter a store name first.'); input.focus(); return; }
+      const key = normalizedName(storeName);
+      if (storeTargets.has(key) || riderRoster.some(rider => normalizedName(rider.homeStore) === key)) { showToast(`${storeName} is already listed for this month.`); input.focus(); return; }
+      storeTargets.set(key, { storeName, target: null }); pendingTargetStores.add(key);
+      input.value = ''; renderStoreTargets();
+      document.querySelectorAll('.store-target-input').forEach(targetInput => { if (normalizedName(targetInput.dataset.store) === key) targetInput.focus(); });
+    });
     $('#export-rider-report').addEventListener('click', () => {
-      const rows = riderMonthRows();
-      const groups = new Map();
-      rows.forEach(row => { const name = row.driverName.trim(); if (!groups.has(name)) groups.set(name, []); groups.get(name).push(row); });
-      const result = [...groups].map(([name, items]) => {
-        const target = riderTargets.has(name) ? Number(riderTargets.get(name)) : '';
-        const validCount = items.filter(valid).length;
-        const invalidCount = items.filter(row => /^(no|false|invalid|0)$/i.test(String(row.valid || '').trim())).length;
-        const timed = items.filter(row => row.mbd != null && row.mbd !== '' && Number.isFinite(Number(row.mbd)));
-        const onTime = timed.filter(row => Number(row.mbd) >= 0).length;
-        const balance = target === '' ? '' : target - items.length;
-        return [name, [...new Set(items.map(row => row.store).filter(Boolean))].join('; '), target, items.length, validCount, invalidCount, timed.length ? `${Math.round(onTime / timed.length * 100)}%` : '', balance, riderComment({ achieved: items.length, invalid: invalidCount, onTimeRate: timed.length ? onTime / timed.length : null }, target === '' ? null : target)];
-      }).sort((a, b) => b[3] - a[3]);
       const columns = ['RANK', 'NAMES', 'STORE BELONG TO', 'TARGET', 'ACHIEVED', 'VALID', 'INVALID', 'ONTIME %', 'TARGET BALANCE', 'COMMENT'];
-      const csv = [columns, ...result.map((row, index) => [index + 1, ...row])].map(row => row.map(cell => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(',')).join('\r\n');
+      const rows = [...document.querySelectorAll('#rider-report-rows tr')].filter(row => row.children.length === 10).map(row => [...row.children].map(cell => cell.innerText.trim()));
+      const csv = [columns, ...rows].map(row => row.map(cell => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(',')).join('\r\n');
       const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = `ae-trace-rider-report-${$('#rider-report-month').value}.csv`; link.click(); URL.revokeObjectURL(url);
+    });
+    $('#add-roster-rider').addEventListener('click', () => {
+      riderRoster.push({ riderName: '', homeStore: '' }); renderRiderRoster();
+      $('#rider-roster-rows tr:last-child .roster-name-input')?.focus();
+    });
+    $('#rider-roster-rows').addEventListener('click', async event => {
+      const button = event.target.closest('[data-remove-roster]');
+      if (!button) return;
+      const row = button.closest('tr');
+      const originalName = row.dataset.originalName;
+      if (!originalName) { riderRoster.splice(Number(button.dataset.removeRoster), 1); renderRiderRoster(); return; }
+      if (!window.confirm(`Remove ${originalName} from the Rider Roster? Their order history stays intact; the store target will be divided among the remaining riders.`)) return;
+      button.disabled = true;
+      try { await api(`/api/delivery-report/rider-roster/${encodeURIComponent(originalName)}`, { method: 'DELETE' }); await loadRiderRoster(); showToast(`${originalName} removed from the roster.`); }
+      catch (error) { showToast(error.message); button.disabled = false; }
+    });
+    $('#save-roster').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const riders = [];
+      const names = new Set();
+      for (const row of document.querySelectorAll('#rider-roster-rows tr[data-roster-index]')) {
+        const riderName = row.querySelector('.roster-name-input').value.trim();
+        const homeStore = row.querySelector('.roster-store-input').value.trim();
+        if (!riderName && !homeStore) continue;
+        if (!riderName || !homeStore) { showToast('Complete both the rider name and home store for every roster row.'); row.querySelector(!riderName ? '.roster-name-input' : '.roster-store-input').focus(); return; }
+        const key = normalizedName(riderName);
+        if (names.has(key)) { showToast(`Rider “${riderName}” appears more than once.`); row.querySelector('.roster-name-input').focus(); return; }
+        names.add(key);
+        const originalName = row.dataset.originalName || '';
+        riders.push({ riderName, homeStore, ...(originalName && originalName !== riderName ? { previousName: originalName } : {}) });
+      }
+      button.disabled = true; button.textContent = 'Saving…';
+      try {
+        const result = await api('/api/delivery-report/rider-roster', { method: 'PUT', body: JSON.stringify({ riders }) });
+        await loadRiderRoster(); showToast(`${result.saved} rider assignments saved.`);
+      } catch (error) { showToast(error.message); }
+      finally { button.disabled = false; button.textContent = 'Save roster'; }
+    });
+    $('#import-roster').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      let riders;
+      try { riders = rosterRowsFromPaste($('#roster-paste').value); }
+      catch (error) { $('#roster-feedback').textContent = error.message; $('#roster-feedback').className = 'roster-status error'; return; }
+      button.disabled = true; button.textContent = 'Importing…';
+      try {
+        const result = await api('/api/delivery-report/rider-roster', { method: 'PUT', body: JSON.stringify({ riders }) });
+        $('#roster-paste').value = ''; $('#roster-feedback').textContent = `${result.saved} rider assignments imported.`; $('#roster-feedback').className = 'roster-status success';
+        await loadRiderRoster(); showToast(`${result.saved} roster rows imported.`);
+      } catch (error) { $('#roster-feedback').textContent = error.message; $('#roster-feedback').className = 'roster-status error'; }
+      finally { button.disabled = false; button.textContent = 'Import roster rows'; }
     });
     $('#delivery-paste').addEventListener('input', () => {
       previewRows = []; $('#import-paste').disabled = true;
@@ -370,7 +533,10 @@ async function boot() {
       const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = `ae-trace-delivery-data-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
     });
     const initialView = location.hash.slice(1);
-    setActiveView(['dashboard', 'overview', 'store-reports', 'riders-reports', 'data-sheet'].includes(initialView) ? initialView : 'dashboard');
+    setActiveView(['dashboard', 'overview', 'store-reports', 'store-targets', 'riders-reports', 'rider-roster', 'data-sheet'].includes(initialView) ? initialView : 'dashboard');
+    $('#rider-report-month').value = monthNow();
+    $('#store-target-month').value = monthNow();
+    try { await loadRiderRoster(); } catch (error) { showToast(error.message); }
     await loadOrders();
     try { await loadRiderMonth(); } catch (error) { showToast(error.message); }
   } catch (error) {

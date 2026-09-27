@@ -287,8 +287,8 @@ app.get('/api/delivery-report/orders', requireAdmin, async (req, res) => {
 });
 function deliveryReportFail(res, error, message) {
   if (error?.code === 'PGRST205' || error?.code === '42P01') {
-    console.error(`${message}: delivery_report_orders table is missing; apply supabase/migrations/202609270001_delivery_report.sql`);
-    return res.status(503).json({ error: 'Delivery Report database setup is incomplete. Ask an administrator to apply the latest Supabase database migration, then try again.' });
+    console.error(`${message}: a Delivery Report table is missing; apply the Supabase migrations in order`);
+    return res.status(503).json({ error: 'Delivery Report database setup is incomplete. Ask an administrator to apply the Supabase migrations, then try again.' });
   }
   return fail(res, error, message);
 }
@@ -367,6 +367,93 @@ app.put('/api/delivery-report/rider-targets', requireAdmin, async (req, res) => 
     if (saved.length || cleared.length) await audit(req.admin.email || req.admin.id, 'delivery_report_rider_targets_saved', null, { month, count: saved.length, cleared: cleared.length });
     res.json({ saved: saved.length, cleared: cleared.length });
   } catch (error) { return deliveryReportFail(res, error, 'Could not save rider targets'); }
+});
+app.get('/api/delivery-report/rider-roster', requireAdmin, async (_req, res) => {
+  try {
+    const { data, error } = await db.from('delivery_report_rider_roster').select('rider_name,home_store').order('home_store').order('rider_name');
+    if (error) return deliveryReportFail(res, error, 'Could not load rider roster');
+    res.json(data.map(row => ({ riderName: row.rider_name, homeStore: row.home_store })));
+  } catch (error) { return deliveryReportFail(res, error, 'Could not load rider roster'); }
+});
+app.put('/api/delivery-report/rider-roster', requireAdmin, async (req, res) => {
+  const riders = req.body?.riders;
+  if (!Array.isArray(riders) || riders.length > 500) return res.status(400).json({ error: 'Paste or save up to 500 rider assignments at a time.' });
+  const saved = [];
+  const renamed = [];
+  const names = new Set();
+  for (const item of riders) {
+    const riderName = typeof item?.riderName === 'string' ? item.riderName.trim().slice(0, 160) : '';
+    const homeStore = typeof item?.homeStore === 'string' ? item.homeStore.trim().slice(0, 160) : '';
+    if (!riderName || !homeStore) return res.status(400).json({ error: 'Every roster row needs a rider name and home store.' });
+    const key = riderName.toLocaleLowerCase().replace(/\s+/g, ' ');
+    if (names.has(key)) return res.status(400).json({ error: `Rider “${riderName}” appears more than once in the roster.` });
+    names.add(key);
+    const previousName = typeof item?.previousName === 'string' ? item.previousName.trim().slice(0, 160) : '';
+    if (previousName && previousName !== riderName) renamed.push(previousName);
+    saved.push({ rider_name: riderName, home_store: homeStore, created_by: req.admin.id, updated_at: now() });
+  }
+  try {
+    if (renamed.length) {
+      const { error } = await db.from('delivery_report_rider_roster').delete().in('rider_name', renamed);
+      if (error) return deliveryReportFail(res, error, 'Could not update rider names');
+    }
+    if (saved.length) {
+      const { error } = await db.from('delivery_report_rider_roster').upsert(saved, { onConflict: 'rider_name' });
+      if (error) return deliveryReportFail(res, error, 'Could not save rider roster');
+    }
+    if (saved.length || renamed.length) await audit(req.admin.email || req.admin.id, 'delivery_report_rider_roster_saved', null, { count: saved.length, renamed: renamed.length });
+    res.json({ saved: saved.length, renamed: renamed.length });
+  } catch (error) { return deliveryReportFail(res, error, 'Could not save rider roster'); }
+});
+app.delete('/api/delivery-report/rider-roster/:riderName', requireAdmin, async (req, res) => {
+  const riderName = typeof req.params.riderName === 'string' ? req.params.riderName.trim().slice(0, 160) : '';
+  if (!riderName) return res.status(400).json({ error: 'Rider name is required.' });
+  try {
+    const { error } = await db.from('delivery_report_rider_roster').delete().eq('rider_name', riderName);
+    if (error) return deliveryReportFail(res, error, 'Could not remove rider from roster');
+    await audit(req.admin.email || req.admin.id, 'delivery_report_rider_removed_from_roster', null, { riderName });
+    res.json({ removed: riderName });
+  } catch (error) { return deliveryReportFail(res, error, 'Could not remove rider from roster'); }
+});
+app.get('/api/delivery-report/store-targets', requireAdmin, async (req, res) => {
+  const month = req.query.month;
+  if (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: 'Choose a valid report month.' });
+  try {
+    const { data, error } = await db.from('delivery_report_store_targets').select('store_name,target').eq('report_month', `${month}-01`).order('store_name');
+    if (error) return deliveryReportFail(res, error, 'Could not load store targets');
+    res.json(data.map(row => ({ storeName: row.store_name, target: row.target })));
+  } catch (error) { return deliveryReportFail(res, error, 'Could not load store targets'); }
+});
+app.put('/api/delivery-report/store-targets', requireAdmin, async (req, res) => {
+  const { month, targets } = req.body || {};
+  if (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: 'Choose a valid target month.' });
+  if (!Array.isArray(targets) || targets.length > 500) return res.status(400).json({ error: 'Invalid store target list.' });
+  const saved = [];
+  const cleared = [];
+  const stores = new Set();
+  for (const item of targets) {
+    const storeName = typeof item?.storeName === 'string' ? item.storeName.trim().slice(0, 160) : '';
+    if (!storeName) return res.status(400).json({ error: 'Each target row needs a store name.' });
+    const key = storeName.toLocaleLowerCase().replace(/\s+/g, ' ');
+    if (stores.has(key)) return res.status(400).json({ error: `Store “${storeName}” appears more than once.` });
+    stores.add(key);
+    if (item.target == null || item.target === '') { cleared.push(storeName); continue; }
+    const target = Number(item.target);
+    if (!Number.isInteger(target) || target < 1 || target > 1000000) return res.status(400).json({ error: 'Store targets must be whole numbers from 1 to 1,000,000.' });
+    saved.push({ report_month: `${month}-01`, store_name: storeName, target, created_by: req.admin.id, updated_at: now() });
+  }
+  try {
+    if (cleared.length) {
+      const { error } = await db.from('delivery_report_store_targets').delete().eq('report_month', `${month}-01`).in('store_name', cleared);
+      if (error) return deliveryReportFail(res, error, 'Could not clear store targets');
+    }
+    if (saved.length) {
+      const { error } = await db.from('delivery_report_store_targets').upsert(saved, { onConflict: 'report_month,store_name' });
+      if (error) return deliveryReportFail(res, error, 'Could not save store targets');
+    }
+    if (saved.length || cleared.length) await audit(req.admin.email || req.admin.id, 'delivery_report_store_targets_saved', null, { month, count: saved.length, cleared: cleared.length });
+    res.json({ saved: saved.length, cleared: cleared.length });
+  } catch (error) { return deliveryReportFail(res, error, 'Could not save store targets'); }
 });
 app.get('/api/reports/bike-tracker', requireAdmin, async (req, res) => {
   const from = req.query.from;
