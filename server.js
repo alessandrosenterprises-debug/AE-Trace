@@ -316,6 +316,58 @@ app.post('/api/delivery-report/orders/import', requireAdmin, async (req, res) =>
     res.status(201).json({ imported: data.length });
   } catch (error) { return deliveryReportFail(res, error, 'Could not import delivery report data'); }
 });
+app.get('/api/delivery-report/rider-targets', requireAdmin, async (req, res) => {
+  const month = req.query.month;
+  if (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: 'Choose a valid report month.' });
+  try {
+    const { data, error } = await db.from('delivery_report_rider_targets').select('rider_name,target').eq('report_month', `${month}-01`).order('rider_name');
+    if (error) return deliveryReportFail(res, error, 'Could not load rider targets');
+    res.json(data.map(row => ({ riderName: row.rider_name, target: row.target })));
+  } catch (error) { return deliveryReportFail(res, error, 'Could not load rider targets'); }
+});
+app.get('/api/delivery-report/rider-orders', requireAdmin, async (req, res) => {
+  const month = req.query.month;
+  if (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: 'Choose a valid report month.' });
+  const [year, monthNumber] = month.split('-').map(Number);
+  const nextMonth = new Date(Date.UTC(year, monthNumber, 1)).toISOString().slice(0, 10);
+  const rows = [];
+  try {
+    for (let offset = 0; offset < 20000; offset += 1000) {
+      const { data, error } = await db.from('delivery_report_orders').select('driver_name,store,valid,mbd,delivery_date').gte('delivery_date', `${month}-01`).lt('delivery_date', nextMonth).order('id', { ascending: true }).range(offset, offset + 999);
+      if (error) return deliveryReportFail(res, error, 'Could not load rider report orders');
+      rows.push(...data);
+      if (data.length < 1000) break;
+    }
+    res.json({ rows: rows.map(row => ({ driverName: row.driver_name, store: row.store, valid: row.valid, mbd: row.mbd, date: row.delivery_date })), truncated: rows.length === 20000 });
+  } catch (error) { return deliveryReportFail(res, error, 'Could not load rider report orders'); }
+});
+app.put('/api/delivery-report/rider-targets', requireAdmin, async (req, res) => {
+  const { month, targets } = req.body || {};
+  if (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: 'Choose a valid report month.' });
+  if (!Array.isArray(targets) || targets.length > 500) return res.status(400).json({ error: 'Invalid rider target list.' });
+  const saved = [];
+  const cleared = [];
+  for (const item of targets) {
+    const riderName = typeof item?.riderName === 'string' ? item.riderName.trim().slice(0, 160) : '';
+    if (!riderName) return res.status(400).json({ error: 'Each rider needs a name.' });
+    if (item.target == null || item.target === '') { cleared.push(riderName); continue; }
+    const target = Number(item.target);
+    if (!Number.isInteger(target) || target < 1 || target > 100000) return res.status(400).json({ error: 'Each rider target must be a whole number from 1 to 100,000.' });
+    saved.push({ report_month: `${month}-01`, rider_name: riderName, target, created_by: req.admin.id });
+  }
+  try {
+    if (cleared.length) {
+      const { error } = await db.from('delivery_report_rider_targets').delete().eq('report_month', `${month}-01`).in('rider_name', cleared);
+      if (error) return deliveryReportFail(res, error, 'Could not clear rider targets');
+    }
+    if (saved.length) {
+      const { error } = await db.from('delivery_report_rider_targets').upsert(saved, { onConflict: 'report_month,rider_name' });
+      if (error) return deliveryReportFail(res, error, 'Could not save rider targets');
+    }
+    if (saved.length || cleared.length) await audit(req.admin.email || req.admin.id, 'delivery_report_rider_targets_saved', null, { month, count: saved.length, cleared: cleared.length });
+    res.json({ saved: saved.length, cleared: cleared.length });
+  } catch (error) { return deliveryReportFail(res, error, 'Could not save rider targets'); }
+});
 app.get('/api/reports/bike-tracker', requireAdmin, async (req, res) => {
   const from = req.query.from;
   const to = req.query.to;

@@ -4,6 +4,11 @@ const $ = selector => document.querySelector(selector);
 let supabase;
 let orders = [];
 let previewRows = [];
+let riderMonthData = [];
+let riderTargets = new Map();
+let riderTargetMonth = '';
+let riderDataMonth = '';
+let riderMonthManuallySelected = false;
 let toastTimer;
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -150,6 +155,88 @@ function reportTable(rows, target) {
   }).join('') : emptyRow(6);
 }
 
+function monthNow() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function riderMonthRows() {
+  return riderMonthData.filter(row => row.driverName?.trim());
+}
+
+function riderComment(stats, target) {
+  if (target == null) return 'Set a monthly target to generate a performance comment.';
+  const achievement = target === 0 ? (stats.achieved > 0 ? 1 : 0) : stats.achieved / target;
+  const quality = stats.onTimeRate != null && stats.onTimeRate >= 0.8 && stats.invalid <= 2;
+  if (achievement >= 1 && quality) return 'Outstanding performance — target achieved with good on-time and controlled invalids.';
+  if (achievement >= 1) return 'Target achieved — improve on-time (80%+) and keep invalid orders to 2 or fewer.';
+  if (achievement >= 0.9 && quality) return 'Very good performance — slightly below target with strong quality.';
+  if (achievement >= 0.9) return 'Near target — improve on-time performance and reduce invalid orders.';
+  if (achievement >= 0.75) return 'Average performance — increase deliveries and improve order quality.';
+  return 'Below expectations — increase delivery effort and control invalid orders.';
+}
+
+function renderRiderReport() {
+  const month = $('#rider-report-month')?.value || monthNow();
+  const rows = riderMonthRows();
+  const groups = new Map();
+  for (const row of rows) {
+    const name = row.driverName.trim();
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(row);
+  }
+  const riders = [...groups].map(([name, items]) => {
+    const validCount = items.filter(valid).length;
+    const invalidCount = items.filter(row => /^(no|false|invalid|0)$/i.test(String(row.valid || '').trim())).length;
+    const withMbd = items.filter(row => row.mbd != null && row.mbd !== '' && Number.isFinite(Number(row.mbd)));
+    const onTime = withMbd.filter(row => Number(row.mbd) >= 0).length;
+    const stores = [...new Set(items.map(row => row.store?.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const target = riderTargets.has(name) ? Number(riderTargets.get(name)) : null;
+    const stats = { name, items, stores, achieved: items.length, valid: validCount, invalid: invalidCount, onTime, onTimeCount: withMbd.length, onTimeRate: withMbd.length ? onTime / withMbd.length : null, target };
+    stats.balance = target == null ? null : target - stats.achieved;
+    stats.comment = riderComment(stats, target);
+    return stats;
+  }).sort((a, b) => b.achieved - a.achieved || (b.target ? b.achieved / b.target : 0) - (a.target ? a.achieved / a.target : 0) || a.name.localeCompare(b.name));
+  const totalTarget = riders.reduce((sum, rider) => sum + (rider.target || 0), 0);
+  const totalAchieved = riders.reduce((sum, rider) => sum + rider.achieved, 0);
+  const totalOnTime = riders.reduce((sum, rider) => sum + rider.onTime, 0);
+  const totalWithMbd = riders.reduce((sum, rider) => sum + rider.onTimeCount, 0);
+  $('#rider-stat-count').textContent = riders.length.toLocaleString();
+  $('#rider-stat-target').textContent = riders.some(rider => rider.target != null) ? totalTarget.toLocaleString() : 'Set targets';
+  $('#rider-stat-target-note').textContent = `${riders.filter(rider => rider.target != null).length} of ${riders.length} riders have a target`;
+  $('#rider-stat-achieved').textContent = totalAchieved.toLocaleString();
+  $('#rider-stat-ontime').textContent = totalWithMbd ? `${Math.round(totalOnTime / totalWithMbd * 100)}%` : '—';
+  $('#rider-report-period').textContent = new Date(`${month}-01T00:00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }).toUpperCase();
+  const champion = riders[0];
+  $('#rider-champion-name').textContent = champion?.name || 'No rider data yet';
+  $('#rider-champion-detail').textContent = champion ? `${champion.stores.join(', ') || 'Store not specified'} · ${champion.target == null ? 'Target not set' : `${champion.achieved} of ${champion.target} deliveries`} · ${champion.onTimeRate == null ? 'On-time data unavailable' : `${Math.round(champion.onTimeRate * 100)}% on-time`}` : 'Import monthly delivery rows to see the top performer.';
+  $('#rider-champion-score').textContent = champion ? champion.achieved.toLocaleString() : '—';
+  $('#rider-report-rows').innerHTML = riders.length ? riders.map((rider, index) => `<tr><td><span class="rider-rank ${index < 3 ? 'top-rank' : ''}">${index + 1}</span></td><td><strong>${esc(rider.name)}</strong></td><td>${esc(rider.stores.join(', ') || '—')}</td><td><input class="rider-target" type="number" min="1" max="100000" step="1" inputmode="numeric" aria-label="${esc(`Monthly target for ${rider.name}`)}" data-rider="${esc(rider.name)}" value="${rider.target == null ? '' : esc(rider.target)}" placeholder="Set target"></td><td><b>${rider.achieved.toLocaleString()}</b></td><td>${rider.valid.toLocaleString()}</td><td>${rider.invalid.toLocaleString()}</td><td><span class="rider-rate ${rider.onTimeRate != null && rider.onTimeRate < .8 ? 'rate-low' : ''}">${rider.onTimeRate == null ? '—' : `${Math.round(rider.onTimeRate * 100)}%`}</span></td><td>${rider.balance == null ? '—' : `<span class="balance-value ${rider.balance < 0 ? 'balance-ahead' : rider.balance > 0 ? 'balance-behind' : ''}">${rider.balance > 0 ? '+' : ''}${rider.balance.toLocaleString()}</span>`}</td><td class="rider-comment">${esc(rider.comment)}</td></tr>`).join('') : emptyRow(10, `No dated rider orders for ${esc($('#rider-report-period').textContent)}. Import rows with a Date and Driver Name in the Data Sheet.`);
+}
+
+async function loadRiderTargets() {
+  const month = $('#rider-report-month').value;
+  if (riderTargetMonth === month) { renderRiderReport(); return; }
+  riderTargetMonth = month;
+  riderTargets = new Map((await api(`/api/delivery-report/rider-targets?month=${encodeURIComponent(month)}`)).map(item => [item.riderName, item.target]));
+  renderRiderReport();
+}
+
+async function loadRiderReportData() {
+  const month = $('#rider-report-month').value;
+  if (riderDataMonth === month) { renderRiderReport(); return; }
+  riderDataMonth = month;
+  const result = await api(`/api/delivery-report/rider-orders?month=${encodeURIComponent(month)}`);
+  if ($('#rider-report-month').value !== month) return;
+  riderMonthData = result.rows;
+  renderRiderReport();
+  if (result.truncated) showToast('This report is limited to 20,000 orders for the selected month.');
+}
+
+async function loadRiderMonth() {
+  await Promise.all([loadRiderTargets(), loadRiderReportData()]);
+}
+
 function renderOverview() {
   $('#overview-valid').textContent = orders.filter(valid).length.toLocaleString();
   $('#overview-invalid').textContent = orders.filter(row => /^(no|false|invalid|0)$/i.test(String(row.valid || '').trim())).length.toLocaleString();
@@ -165,12 +252,22 @@ function renderSheet() {
 }
 
 function renderAll() {
-  renderDashboard(); renderOverview(); reportTable(groupRows('store'), '#store-report-rows'); reportTable(groupRows('driverName'), '#rider-report-rows'); renderSheet();
+  renderDashboard(); renderOverview(); reportTable(groupRows('store'), '#store-report-rows'); renderRiderReport(); renderSheet();
   $('#delivery-count-label').textContent = `${orders.length.toLocaleString()} imported records`;
 }
 
 async function loadOrders() {
-  try { orders = await api('/api/delivery-report/orders?limit=5000'); renderAll(); }
+  try {
+    orders = await api('/api/delivery-report/orders?limit=5000');
+    const selectedMonth = $('#rider-report-month')?.value;
+    if (!riderMonthManuallySelected && selectedMonth && !orders.some(row => row.date?.slice(0, 7) === selectedMonth)) {
+      const latestMonth = orders.find(row => row.date)?.date.slice(0, 7);
+      if (latestMonth) { $('#rider-report-month').value = latestMonth; riderTargetMonth = ''; }
+    }
+    riderDataMonth = '';
+    renderAll();
+    try { await loadRiderReportData(); } catch (error) { showToast(error.message); }
+  }
   catch (error) { showToast(error.message); $('#delivery-count-label').textContent = 'Could not load report data'; }
 }
 
@@ -197,6 +294,48 @@ async function boot() {
     $('#delivery-signout').addEventListener('click', async () => { await supabase.auth.signOut(); window.location.assign('/'); });
     $('#delivery-refresh').addEventListener('click', loadOrders);
     $('#data-sheet-refresh').addEventListener('click', loadOrders);
+    $('#rider-report-month').value = monthNow();
+    $('#rider-report-month').addEventListener('change', async () => {
+      riderMonthManuallySelected = true;
+      riderTargetMonth = '';
+      riderDataMonth = '';
+      try { await loadRiderMonth(); } catch (error) { showToast(error.message); }
+    });
+    $('#save-rider-targets').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const targets = [];
+      for (const input of document.querySelectorAll('.rider-target')) {
+        const value = input.value.trim();
+        if (value === '') { targets.push({ riderName: input.dataset.rider, target: null }); continue; }
+        const target = Number(value);
+        if (!Number.isInteger(target) || target < 1 || target > 100000) { showToast(`Enter a whole-number target from 1 to 100,000 for ${input.dataset.rider}.`); input.focus(); return; }
+        targets.push({ riderName: input.dataset.rider, target });
+      }
+      button.disabled = true; button.textContent = 'Saving…';
+      try {
+        const result = await api('/api/delivery-report/rider-targets', { method: 'PUT', body: JSON.stringify({ month: $('#rider-report-month').value, targets }) });
+        riderTargetMonth = ''; await loadRiderTargets();
+        showToast(`${result.saved} targets saved${result.cleared ? `, ${result.cleared} cleared` : ''} for ${$('#rider-report-month').value}.`);
+      } catch (error) { showToast(error.message); }
+      finally { button.disabled = false; button.textContent = 'Save targets'; }
+    });
+    $('#export-rider-report').addEventListener('click', () => {
+      const rows = riderMonthRows();
+      const groups = new Map();
+      rows.forEach(row => { const name = row.driverName.trim(); if (!groups.has(name)) groups.set(name, []); groups.get(name).push(row); });
+      const result = [...groups].map(([name, items]) => {
+        const target = riderTargets.has(name) ? Number(riderTargets.get(name)) : '';
+        const validCount = items.filter(valid).length;
+        const invalidCount = items.filter(row => /^(no|false|invalid|0)$/i.test(String(row.valid || '').trim())).length;
+        const timed = items.filter(row => row.mbd != null && row.mbd !== '' && Number.isFinite(Number(row.mbd)));
+        const onTime = timed.filter(row => Number(row.mbd) >= 0).length;
+        const balance = target === '' ? '' : target - items.length;
+        return [name, [...new Set(items.map(row => row.store).filter(Boolean))].join('; '), target, items.length, validCount, invalidCount, timed.length ? `${Math.round(onTime / timed.length * 100)}%` : '', balance, riderComment({ achieved: items.length, invalid: invalidCount, onTimeRate: timed.length ? onTime / timed.length : null }, target === '' ? null : target)];
+      }).sort((a, b) => b[3] - a[3]);
+      const columns = ['RANK', 'NAMES', 'STORE BELONG TO', 'TARGET', 'ACHIEVED', 'VALID', 'INVALID', 'ONTIME %', 'TARGET BALANCE', 'COMMENT'];
+      const csv = [columns, ...result.map((row, index) => [index + 1, ...row])].map(row => row.map(cell => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(',')).join('\r\n');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = `ae-trace-rider-report-${$('#rider-report-month').value}.csv`; link.click(); URL.revokeObjectURL(url);
+    });
     $('#delivery-paste').addEventListener('input', () => {
       previewRows = []; $('#import-paste').disabled = true;
       $('#paste-feedback').textContent = 'Preview your updated rows before importing.'; $('#paste-feedback').style.color = '';
@@ -233,6 +372,7 @@ async function boot() {
     const initialView = location.hash.slice(1);
     setActiveView(['dashboard', 'overview', 'store-reports', 'riders-reports', 'data-sheet'].includes(initialView) ? initialView : 'dashboard');
     await loadOrders();
+    try { await loadRiderMonth(); } catch (error) { showToast(error.message); }
   } catch (error) {
     $('#delivery-auth-loading').classList.add('hidden');
     $('#delivery-auth-error').classList.remove('hidden');
