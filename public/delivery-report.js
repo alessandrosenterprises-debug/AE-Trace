@@ -21,7 +21,17 @@ const valid = row => /^(yes|true|valid|1)$/i.test(String(row.valid || '').trim()
 const normalizedName = value => String(value || '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
 const api = async (url, options = {}) => {
   const { data: { session } = {} } = await supabase.auth.getSession();
-  const response = await fetch(url, { ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}), ...(options.headers || {}) } });
+  const request = { ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}), ...(options.headers || {}) } };
+  const canRetry = ['GET', 'PUT', 'DELETE'].includes(String(options.method || 'GET').toUpperCase());
+  let response;
+  for (let attempt = 0; ; attempt++) {
+    try { response = await fetch(url, request); break; }
+    catch (error) {
+      if (canRetry && attempt === 0) { await new Promise(resolve => setTimeout(resolve, 700)); continue; }
+      console.error('Could not reach the AE-Trace API', { path: url, origin: window.location.origin, error });
+      throw new Error(`Could not reach the AE-Trace server at ${window.location.host}. Check your connection and retry; pasted data is still in this form.`);
+    }
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
   return data;
