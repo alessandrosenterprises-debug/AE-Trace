@@ -269,22 +269,23 @@ function renderRiderReport() {
     stats.comment = riderComment(stats, target);
     return stats;
   }).sort((a, b) => b.achieved - a.achieved || (b.target ? b.achieved / b.target : 0) - (a.target ? a.achieved / a.target : 0) || a.name.localeCompare(b.name));
+  const ridersWithOrders = riders.filter(rider => rider.achieved > 0);
   const totalTarget = riders.reduce((sum, rider) => sum + (rider.target || 0), 0);
   const targetedRiders = riders.filter(rider => rider.target != null).length;
   const totalAchieved = riders.reduce((sum, rider) => sum + rider.achieved, 0);
   const totalOnTime = riders.reduce((sum, rider) => sum + rider.onTime, 0);
   const totalWithMbd = riders.reduce((sum, rider) => sum + rider.onTimeCount, 0);
-  $('#rider-stat-count').textContent = assignedRiders.length.toLocaleString();
+  $('#rider-stat-count').textContent = ridersWithOrders.length.toLocaleString();
   $('#rider-stat-target').textContent = targetedRiders ? totalTarget.toLocaleString() : 'Set store targets';
-  $('#rider-stat-target-note').textContent = `${targetedRiders} of ${assignedRiders.length} roster riders have an allocated target`;
+  $('#rider-stat-target-note').textContent = `${targetedRiders} roster riders have an allocated target`;
   $('#rider-stat-achieved').textContent = totalAchieved.toLocaleString();
   $('#rider-stat-ontime').textContent = totalWithMbd ? `${Math.round(totalOnTime / totalWithMbd * 100)}%` : '—';
   $('#rider-report-period').textContent = new Date(`${month}-01T00:00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }).toUpperCase();
-  const champion = riders[0];
-  $('#rider-champion-name').textContent = champion?.name || 'No rider data yet';
+  const champion = ridersWithOrders[0];
+  $('#rider-champion-name').textContent = champion?.name || 'No rider orders this month';
   $('#rider-champion-detail').textContent = champion ? `${champion.store} · ${champion.target == null ? 'Store target not set' : `${champion.achieved} of ${champion.target} deliveries`} · ${champion.onTimeRate == null ? 'On-time data unavailable' : `${Math.round(champion.onTimeRate * 100)}% on-time`}` : 'Add riders to the Rider Roster to see the month’s top performer.';
   $('#rider-champion-score').textContent = champion ? champion.achieved.toLocaleString() : '—';
-  $('#rider-report-rows').innerHTML = riders.length ? riders.map((rider, index) => `<tr><td><span class="rider-rank ${index < 3 ? 'top-rank' : ''}">${index + 1}</span></td><td><strong>${esc(rider.name)}</strong></td><td class="${rider.listed ? '' : 'unlisted-rider'}">${esc(rider.store || '—')}</td><td>${rider.target == null ? '—' : rider.target.toLocaleString()}</td><td><b>${rider.achieved.toLocaleString()}</b></td><td>${rider.valid.toLocaleString()}</td><td>${rider.invalid.toLocaleString()}</td><td><span class="rider-rate ${rider.onTimeRate != null && rider.onTimeRate < .8 ? 'rate-low' : ''}">${rider.onTimeRate == null ? '—' : `${Math.round(rider.onTimeRate * 100)}%`}</span></td><td>${rider.balance == null ? '—' : `<span class="balance-value ${rider.balance < 0 ? 'balance-ahead' : rider.balance > 0 ? 'balance-behind' : ''}">${rider.balance > 0 ? '+' : ''}${rider.balance.toLocaleString()}</span>`}</td><td class="rider-comment">${esc(rider.comment)}</td></tr>`).join('') : emptyRow(10, 'Add riders and their home stores in the Rider Roster to build this report.');
+  $('#rider-report-rows').innerHTML = ridersWithOrders.length ? ridersWithOrders.map((rider, index) => `<tr><td><span class="rider-rank ${index < 3 ? 'top-rank' : ''}">${index + 1}</span></td><td><strong>${esc(rider.name)}</strong></td><td class="${rider.listed ? '' : 'unlisted-rider'}">${esc(rider.store || '—')}</td><td>${rider.target == null ? '—' : rider.target.toLocaleString()}</td><td><b>${rider.achieved.toLocaleString()}</b></td><td>${rider.valid.toLocaleString()}</td><td>${rider.invalid.toLocaleString()}</td><td><span class="rider-rate ${rider.onTimeRate != null && rider.onTimeRate < .8 ? 'rate-low' : ''}">${rider.onTimeRate == null ? '—' : `${Math.round(rider.onTimeRate * 100)}%`}</span></td><td>${rider.balance == null ? '—' : `<span class="balance-value ${rider.balance < 0 ? 'balance-ahead' : rider.balance > 0 ? 'balance-behind' : ''}">${rider.balance > 0 ? '+' : ''}${rider.balance.toLocaleString()}</span>`}</td><td class="rider-comment">${esc(rider.comment)}</td></tr>`).join('') : emptyRow(10, `No rider orders for ${esc($('#rider-report-period').textContent)}. Riders with zero orders are hidden from this list.`);
   renderStoreTargets();
 }
 
