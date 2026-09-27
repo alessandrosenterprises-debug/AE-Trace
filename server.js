@@ -380,29 +380,44 @@ app.put('/api/delivery-report/rider-roster', requireAdmin, async (req, res) => {
   if (!Array.isArray(riders) || riders.length > 500) return res.status(400).json({ error: 'Paste or save up to 500 rider assignments at a time.' });
   const saved = [];
   const renamed = [];
-  const names = new Set();
+  const names = new Map();
   for (const item of riders) {
     const riderName = typeof item?.riderName === 'string' ? item.riderName.trim().slice(0, 160) : '';
     const homeStore = typeof item?.homeStore === 'string' ? item.homeStore.trim().slice(0, 160) : '';
     if (!riderName || !homeStore) return res.status(400).json({ error: 'Every roster row needs a rider name and home store.' });
-    const key = riderName.toLocaleLowerCase().replace(/\s+/g, ' ');
-    if (names.has(key)) return res.status(400).json({ error: `Rider “${riderName}” appears more than once in the roster.` });
-    names.add(key);
+    const key = riderName.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+    const existingStore = names.get(key);
+    if (existingStore) {
+      if (existingStore.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim() !== homeStore.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim()) return res.status(400).json({ error: `Rider “${riderName}” appears more than once with different home stores. Keep one rider entry and choose their official home store.` });
+      continue;
+    }
+    names.set(key, homeStore);
     const previousName = typeof item?.previousName === 'string' ? item.previousName.trim().slice(0, 160) : '';
     if (previousName && previousName !== riderName) renamed.push(previousName);
     saved.push({ rider_name: riderName, home_store: homeStore, created_by: req.admin.id, updated_at: now() });
   }
   try {
-    if (renamed.length) {
-      const { error } = await db.from('delivery_report_rider_roster').delete().in('rider_name', renamed);
+    const removeNames = new Set(renamed);
+    if (saved.length) {
+      const { data: existingRows, error: loadError } = await db.from('delivery_report_rider_roster').select('rider_name,home_store');
+      if (loadError) return deliveryReportFail(res, loadError, 'Could not check for duplicate rider names');
+      const savedNames = new Map(saved.map(row => [row.rider_name.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim(), row.rider_name]));
+      for (const existing of existingRows) {
+        const key = existing.rider_name.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+        const canonicalName = savedNames.get(key);
+        if (canonicalName && existing.rider_name !== canonicalName) removeNames.add(existing.rider_name);
+      }
+    }
+    if (removeNames.size) {
+      const { error } = await db.from('delivery_report_rider_roster').delete().in('rider_name', [...removeNames]);
       if (error) return deliveryReportFail(res, error, 'Could not update rider names');
     }
     if (saved.length) {
       const { error } = await db.from('delivery_report_rider_roster').upsert(saved, { onConflict: 'rider_name' });
       if (error) return deliveryReportFail(res, error, 'Could not save rider roster');
     }
-    if (saved.length || renamed.length) await audit(req.admin.email || req.admin.id, 'delivery_report_rider_roster_saved', null, { count: saved.length, renamed: renamed.length });
-    res.json({ saved: saved.length, renamed: renamed.length });
+    if (saved.length || removeNames.size) await audit(req.admin.email || req.admin.id, 'delivery_report_rider_roster_saved', null, { count: saved.length, renamed: removeNames.size });
+    res.json({ saved: saved.length, renamed: removeNames.size });
   } catch (error) { return deliveryReportFail(res, error, 'Could not save rider roster'); }
 });
 app.delete('/api/delivery-report/rider-roster/:riderName', requireAdmin, async (req, res) => {

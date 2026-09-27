@@ -18,7 +18,7 @@ const money = (currency, amount) => amount == null || amount === '' ? '—' : `$
 const num = value => Number(value || 0);
 const delivered = row => /delivered/i.test(row.status || '');
 const valid = row => /^(yes|true|valid|1)$/i.test(String(row.valid || '').trim());
-const normalizedName = value => String(value || '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+const normalizedName = value => String(value || '').normalize('NFKC').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
 const api = async (url, options = {}) => {
   const { data: { session } = {} } = await supabase.auth.getSession();
   const request = { ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}), ...(options.headers || {}) } };
@@ -79,14 +79,30 @@ function rosterRowsFromPaste(text) {
   const hasHeader = nameIndex >= 0 && storeIndex >= 0;
   const data = hasHeader ? matrix.slice(1) : matrix;
   const positions = hasHeader ? [nameIndex, storeIndex] : [0, 1];
-  const riders = data.filter(row => row.some(value => value.trim())).map((row, index) => {
+  const ridersByName = new Map();
+  const conflictsByName = new Map();
+  let duplicates = 0;
+  data.filter(row => row.some(value => value.trim())).forEach((row, index) => {
     const riderName = (row[positions[0]] || '').trim();
     const homeStore = (row[positions[1]] || '').trim();
     if (!riderName || !homeStore) throw new Error(`Roster row ${index + 1}: include both a rider name and a home store.`);
-    return { riderName, homeStore };
+    const key = normalizedName(riderName);
+    if (conflictsByName.has(key)) { conflictsByName.get(key).stores.add(homeStore); return; }
+    const existing = ridersByName.get(key);
+    if (existing) {
+      if (normalizedName(existing.homeStore) !== normalizedName(homeStore)) {
+        ridersByName.delete(key);
+        conflictsByName.set(key, { riderName: existing.riderName, stores: new Set([existing.homeStore, homeStore]) });
+        return;
+      }
+      duplicates++;
+      return;
+    }
+    ridersByName.set(key, { riderName, homeStore });
   });
-  if (!riders.length) throw new Error('Paste at least one rider and home store.');
-  return riders;
+  const riders = [...ridersByName.values()];
+  if (!riders.length && !conflictsByName.size) throw new Error('Paste at least one rider and home store.');
+  return { riders, duplicates, conflicts: [...conflictsByName.values()].map(conflict => ({ riderName: conflict.riderName, stores: [...conflict.stores] })) };
 }
 
 function parseNumber(value) {
@@ -477,15 +493,19 @@ async function boot() {
     $('#save-roster').addEventListener('click', async event => {
       const button = event.currentTarget;
       const riders = [];
-      const names = new Set();
+      const names = new Map();
       for (const row of document.querySelectorAll('#rider-roster-rows tr[data-roster-index]')) {
         const riderName = row.querySelector('.roster-name-input').value.trim();
         const homeStore = row.querySelector('.roster-store-input').value.trim();
         if (!riderName && !homeStore) continue;
         if (!riderName || !homeStore) { showToast('Complete both the rider name and home store for every roster row.'); row.querySelector(!riderName ? '.roster-name-input' : '.roster-store-input').focus(); return; }
         const key = normalizedName(riderName);
-        if (names.has(key)) { showToast(`Rider “${riderName}” appears more than once.`); row.querySelector('.roster-name-input').focus(); return; }
-        names.add(key);
+        const existingStore = names.get(key);
+        if (existingStore) {
+          if (normalizedName(existingStore) !== normalizedName(homeStore)) { showToast(`Rider “${riderName}” appears more than once with different home stores. Keep one rider entry and choose their official home store.`); row.querySelector('.roster-store-input').focus(); return; }
+          continue;
+        }
+        names.set(key, homeStore);
         const originalName = row.dataset.originalName || '';
         riders.push({ riderName, homeStore, ...(originalName && originalName !== riderName ? { previousName: originalName } : {}) });
       }
@@ -498,14 +518,18 @@ async function boot() {
     });
     $('#import-roster').addEventListener('click', async event => {
       const button = event.currentTarget;
-      let riders;
-      try { riders = rosterRowsFromPaste($('#roster-paste').value); }
+      let parsed;
+      try { parsed = rosterRowsFromPaste($('#roster-paste').value); }
       catch (error) { $('#roster-feedback').textContent = error.message; $('#roster-feedback').className = 'roster-status error'; return; }
+      const { riders, duplicates, conflicts } = parsed;
+      if (!riders.length) { $('#roster-feedback').textContent = 'Every rider is listed under multiple home stores. Resolve those assignments, then import again.'; $('#roster-feedback').className = 'roster-status error'; return; }
       button.disabled = true; button.textContent = 'Importing…';
       try {
         const result = await api('/api/delivery-report/rider-roster', { method: 'PUT', body: JSON.stringify({ riders }) });
-        $('#roster-paste').value = ''; $('#roster-feedback').textContent = `${result.saved} rider assignments imported.`; $('#roster-feedback').className = 'roster-status success';
-        await loadRiderRoster(); showToast(`${result.saved} roster rows imported.`);
+        $('#roster-paste').value = '';
+        const summary = [`${result.saved} rider assignments imported`, ...(duplicates ? [`${duplicates} formatting duplicate ${duplicates === 1 ? 'row merged' : 'rows merged'}`] : []), ...(conflicts.length ? [`${conflicts.length} riders skipped: ${conflicts.map(conflict => `${conflict.riderName} (${conflict.stores.join(' / ')})`).join('; ')}. Add each once with their official home store.`] : [])].join('. ');
+        $('#roster-feedback').textContent = summary; $('#roster-feedback').className = conflicts.length ? 'roster-status error' : 'roster-status success';
+        await loadRiderRoster(); showToast(`${result.saved} roster rows imported${duplicates ? `; ${duplicates} duplicates merged` : ''}${conflicts.length ? `; ${conflicts.length} need a home-store choice` : ''}.`);
       } catch (error) { $('#roster-feedback').textContent = error.message; $('#roster-feedback').className = 'roster-status error'; }
       finally { button.disabled = false; button.textContent = 'Import roster rows'; }
     });
