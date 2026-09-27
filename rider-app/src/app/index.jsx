@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, AppState, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as Location from 'expo-location';
 import * as Device from 'expo-device';
@@ -107,6 +107,51 @@ export default function RiderHome() {
   useEffect(() => {
     if (!token || !apiUrl || busy) return undefined;
     let active = true;
+    let recovering = false;
+    let previousAppState = AppState.currentState;
+    const recoverTracking = async () => {
+      if (!active || recovering) return;
+      recovering = true;
+      try {
+        let profileResponse;
+        try { profileResponse = await fetch(`${cleanUrl(apiUrl)}/api/device/profile`, { headers: { Authorization: `Bearer ${token}` } }); }
+        catch { /* Resume location collection offline; queued points upload when service returns. */ }
+        if (profileResponse?.status === 401 || profileResponse?.status === 423) {
+          await stopManagedLocationUpdates();
+          if (active) { setTrackingStatus('admin-managed'); setTrackingDetail('Your fleet administrator has disabled tracking for this device.'); }
+          return;
+        }
+        if (profileResponse?.ok) {
+          const profile = await profileResponse.json();
+          if (profile.rider?.status && profile.rider.status !== 'active') {
+            await stopManagedLocationUpdates();
+            if (active) { setTrackingStatus('admin-managed'); setTrackingDetail('Your fleet administrator has disabled tracking for this device.'); }
+            return;
+          }
+        }
+        if (!(await Location.hasServicesEnabledAsync())) {
+          if (active) { setTrackingStatus('error'); setTrackingDetail('Turn on Location in phone settings to resume fleet tracking.'); }
+          return;
+        }
+        let intervalSeconds = 5;
+        try { const intervalResponse = await fetch(`${cleanUrl(apiUrl)}/api/device/settings`, { headers: { Authorization: `Bearer ${token}` } }); if (intervalResponse.ok) { const policy = await intervalResponse.json(); if (Number.isInteger(policy.locationIntervalSeconds)) intervalSeconds = Math.max(5, Math.min(300, policy.locationIntervalSeconds)); } } catch { /* Keep the local five-second default while offline. */ }
+        const result = await startManagedLocationUpdates(intervalSeconds);
+        if (!active) return;
+        setTrackingStatus(result.status);
+        setTrackingDetail(result.detail);
+        if (result.status === 'active') {
+          try { const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }); await sendLocation(current); }
+          catch (error) { if ([401, 423].includes(error.status)) { await stopManagedLocationUpdates(); if (active) { setTrackingStatus('admin-managed'); setTrackingDetail('Your fleet administrator has disabled tracking for this device.'); } } else if (active) setMessage(error.message || 'Location will upload when internet returns.'); }
+        }
+      } catch (error) {
+        if (active) { setTrackingStatus('error'); setTrackingDetail('Tracking needs attention. Check location permission, internet, and Infinix background-start settings.'); setMessage(error.message || 'Could not resume location sharing.'); }
+      } finally { recovering = false; }
+    };
+    const appStateSubscription = AppState.addEventListener('change', nextState => {
+      const resumed = previousAppState !== 'active' && nextState === 'active';
+      previousAppState = nextState;
+      if (resumed) recoverTracking();
+    });
     (async () => {
       try {
         let intervalSeconds=5;
@@ -129,7 +174,7 @@ export default function RiderHome() {
         if (active) { setTrackingStatus('error'); setTrackingDetail('Automatic location sharing could not start. Contact your fleet administrator.'); setMessage(error.message || 'Could not start location sharing.'); }
       }
     })();
-    return () => { active = false; watch.current?.remove(); watch.current = null; clearInterval(timer.current); };
+    return () => { active = false; appStateSubscription.remove(); watch.current?.remove(); watch.current = null; clearInterval(timer.current); };
   }, [apiUrl, busy, request, sendLocation, token]);
 
   const enroll = async () => {
