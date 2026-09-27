@@ -214,6 +214,9 @@ function monthNow() {
 }
 
 function riderMonthRows() {
+  const selectedMonth = $('#rider-report-month')?.value;
+  // Keep the target count tied to the selected month while a new month loads.
+  if (selectedMonth && riderDataMonth !== selectedMonth) return [];
   return riderMonthData.filter(row => row.driverName?.trim());
 }
 
@@ -331,10 +334,10 @@ async function loadStoreTargets() {
 async function loadRiderReportData() {
   const month = $('#rider-report-month').value;
   if (riderDataMonth === month) { renderRiderReport(); return; }
-  riderDataMonth = month;
   const result = await api(`/api/delivery-report/rider-orders?month=${encodeURIComponent(month)}`);
   if ($('#rider-report-month').value !== month) return;
   riderMonthData = result.rows;
+  riderDataMonth = month;
   renderRiderReport();
   if (result.truncated) showToast('This report is limited to 20,000 orders for the selected month.');
 }
