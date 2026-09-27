@@ -367,6 +367,14 @@ function renderRiderRoster() {
   options.innerHTML = stores.map(store => `<option value="${esc(store)}"></option>`).join('');
 }
 
+function rosterImportSummary(count, duplicates, conflicts, responseRecovered = false) {
+  const parts = [`${count} rider assignments ${responseRecovered ? 'are saved' : 'imported'}`];
+  if (responseRecovered) parts.push('the connection dropped before the confirmation arrived, but the saved roster was verified');
+  if (duplicates) parts.push(`${duplicates} formatting duplicate ${duplicates === 1 ? 'row was' : 'rows were'} merged`);
+  if (conflicts.length) parts.push(`${conflicts.length} riders were skipped because they have different home stores: ${conflicts.map(conflict => `${conflict.riderName} (${conflict.stores.join(' / ')})`).join('; ')}. Add each once with their official home store`);
+  return `${parts.join('. ')}.`;
+}
+
 function renderOverview() {
   $('#overview-valid').textContent = orders.filter(valid).length.toLocaleString();
   $('#overview-invalid').textContent = orders.filter(row => /^(no|false|invalid|0)$/i.test(String(row.valid || '').trim())).length.toLocaleString();
@@ -527,10 +535,26 @@ async function boot() {
       try {
         const result = await api('/api/delivery-report/rider-roster', { method: 'PUT', body: JSON.stringify({ riders }) });
         $('#roster-paste').value = '';
-        const summary = [`${result.saved} rider assignments imported`, ...(duplicates ? [`${duplicates} formatting duplicate ${duplicates === 1 ? 'row merged' : 'rows merged'}`] : []), ...(conflicts.length ? [`${conflicts.length} riders skipped: ${conflicts.map(conflict => `${conflict.riderName} (${conflict.stores.join(' / ')})`).join('; ')}. Add each once with their official home store.`] : [])].join('. ');
+        const summary = rosterImportSummary(result.saved, duplicates, conflicts);
         $('#roster-feedback').textContent = summary; $('#roster-feedback').className = conflicts.length ? 'roster-status error' : 'roster-status success';
         await loadRiderRoster(); showToast(`${result.saved} roster rows imported${duplicates ? `; ${duplicates} duplicates merged` : ''}${conflicts.length ? `; ${conflicts.length} need a home-store choice` : ''}.`);
-      } catch (error) { $('#roster-feedback').textContent = error.message; $('#roster-feedback').className = 'roster-status error'; }
+      } catch (error) {
+        let saved = false;
+        try {
+          const currentRoster = await api('/api/delivery-report/rider-roster');
+          const savedByName = new Map(currentRoster.map(rider => [normalizedName(rider.riderName), normalizedName(rider.homeStore)]));
+          saved = riders.every(rider => savedByName.get(normalizedName(rider.riderName)) === normalizedName(rider.homeStore));
+        } catch (checkError) { console.error('Could not verify roster after a dropped import response', checkError); }
+        if (saved) {
+          $('#roster-paste').value = '';
+          $('#roster-feedback').textContent = rosterImportSummary(riders.length, duplicates, conflicts, true);
+          $('#roster-feedback').className = conflicts.length ? 'roster-status error' : 'roster-status success';
+          try { await loadRiderRoster(); } catch (refreshError) { console.error('Could not refresh the saved rider roster', refreshError); }
+          showToast('Roster saved; its confirmation was recovered after a brief connection drop.');
+        } else {
+          $('#roster-feedback').textContent = error.message; $('#roster-feedback').className = 'roster-status error';
+        }
+      }
       finally { button.disabled = false; button.textContent = 'Import roster rows'; }
     });
     $('#delivery-paste').addEventListener('input', () => {
