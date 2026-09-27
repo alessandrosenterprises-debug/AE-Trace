@@ -570,7 +570,7 @@ async function boot() {
     $('#preview-paste').addEventListener('click', () => {
       try {
         previewRows = rowsFromPaste($('#delivery-paste').value);
-        if (previewRows.length > 2000) throw new Error('Import 2,000 rows or fewer at a time.');
+        if (previewRows.length > 5000) throw new Error('Import 5,000 rows or fewer at a time.');
         $('#paste-feedback').textContent = `${previewRows.length.toLocaleString()} rows ready to import.`;
         $('#paste-feedback').style.color = '#77e1bf';
         $('#import-paste').disabled = false;

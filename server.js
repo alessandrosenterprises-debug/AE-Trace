@@ -295,7 +295,7 @@ function deliveryReportFail(res, error, message) {
 app.post('/api/delivery-report/orders/import', requireAdmin, async (req, res) => {
   try {
     const rows = req.body?.rows;
-    if (!Array.isArray(rows) || rows.length < 1 || rows.length > 2000) return res.status(400).json({ error: 'Paste between 1 and 2,000 data rows per import.' });
+    if (!Array.isArray(rows) || rows.length < 1 || rows.length > 5000) return res.status(400).json({ error: 'Paste between 1 and 5,000 data rows per import.' });
     const clean = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) || null : null;
     const imported = [];
     for (let index = 0; index < rows.length; index++) {
