@@ -100,7 +100,7 @@ app.post('/api/device/profile-photo',express.json({limit:'1100kb'}),requireDevic
     res.json({ok:true,avatarUrl});
   }catch(error){return fail(res,error);}
 });
-app.use(express.json({ limit: '32kb' }));
+app.use(express.json({ limit: '2mb' }));
 app.get('/api/health', (_req, res) => res.json({ ok: true, timestamp: now() }));
 app.get('/api/config', (_req, res) => res.json({ supabaseUrl, supabaseAnonKey: anonKey, mapTilerKey: process.env.MAPTILER_API_KEY || null }));
 app.get('/api/me', requireAdmin, (req, res) => {
@@ -277,6 +277,38 @@ app.get('/api/reports/summary',requireAdmin,async(req,res)=>{
     res.json({days,activeRiders:riderResult.data.filter(r=>r.status==='active').length,pausedRiders:riderResult.data.filter(r=>r.status==='paused').length,totalRiders:riderResult.count||0,onlineDevices:deviceResult.data.filter(d=>d.status==='online').length,totalDevices:deviceResult.count||0,locationPoints:locationResult.count||0,from});
   }catch(error){return fail(res,error);}
 });
+app.get('/api/delivery-report/orders', requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(5000, Number(req.query.limit) || 2000));
+    const { data, error } = await db.from('delivery_report_orders').select('*').order('delivery_date', { ascending: false, nullsFirst: false }).order('id', { ascending: false }).limit(limit);
+    if (error) return fail(res, error, 'Could not load delivery report data');
+    res.json(data.map(row => ({ id: row.id, orderNo: row.order_no, date: row.delivery_date, time: row.delivery_time, customerName: row.customer_name, source: row.source, store: row.store, driverName: row.driver_name, status: row.status, valueCurrency: row.value_currency, valueAmount: row.value_amount, mbd: row.mbd, valid: row.valid, createdAt: row.created_at })));
+  } catch (error) { return fail(res, error, 'Could not load delivery report data'); }
+});
+app.post('/api/delivery-report/orders/import', requireAdmin, async (req, res) => {
+  try {
+    const rows = req.body?.rows;
+    if (!Array.isArray(rows) || rows.length < 1 || rows.length > 2000) return res.status(400).json({ error: 'Paste between 1 and 2,000 data rows per import.' });
+    const clean = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) || null : null;
+    const imported = [];
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index] || {};
+      const orderNo = clean(row.orderNo, 160);
+      if (!orderNo) return res.status(400).json({ error: `Row ${index + 1}: Order No is required.` });
+      const date = clean(row.date, 10);
+      if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: `Row ${index + 1}: Date must use YYYY-MM-DD format.` });
+      const numberOrNull = value => value === '' || value == null ? null : Number.isFinite(Number(value)) ? Number(value) : NaN;
+      const amount = numberOrNull(row.valueAmount);
+      const mbd = numberOrNull(row.mbd);
+      if (Number.isNaN(amount) || Number.isNaN(mbd)) return res.status(400).json({ error: `Row ${index + 1}: Value and MBD must be numeric.` });
+      imported.push({ order_no: orderNo, delivery_date: date, delivery_time: clean(row.time, 20), customer_name: clean(row.customerName, 160), source: clean(row.source, 120), store: clean(row.store, 160), driver_name: clean(row.driverName, 160), status: clean(row.status, 60), value_currency: clean(row.valueCurrency, 8), value_amount: amount, mbd, valid: clean(row.valid, 30), created_by: req.admin.id });
+    }
+    const { data, error } = await db.from('delivery_report_orders').insert(imported).select('id');
+    if (error) return fail(res, error, 'Could not import delivery report data');
+    await audit(req.admin.email || req.admin.id, 'delivery_report_imported', null, { rowCount: data.length });
+    res.status(201).json({ imported: data.length });
+  } catch (error) { return fail(res, error, 'Could not import delivery report data'); }
+});
 app.get('/api/reports/bike-tracker', requireAdmin, async (req, res) => {
   const from = req.query.from;
   const to = req.query.to;
@@ -363,6 +395,7 @@ app.patch('/api/devices/:id',requireAdmin,async(req,res)=>{
 // when the Express app is deployed as a Vercel Function.
 app.get('/ae-trace-emblem.png', (_req, res) => res.type('png').sendFile(path.join(__dirname, 'public', 'ae-trace-emblem.png')));
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get(['/delivery-report', '/delivery-report.html'], (_req, res) => res.sendFile(path.join(__dirname, 'public', 'delivery-report.html')));
 
 if (!process.env.VERCEL) app.use(express.static(path.join(__dirname, 'public'), { extensions:['html'] }));
 app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ error:'Internal server error' }); });

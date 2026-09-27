@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1220">
+  <title>AE-Trace | Delivery Report</title>
+  <link rel="icon" type="image/png" href="/ae-trace-emblem.png?v=3"><link rel="stylesheet" href="/delivery-report.css">
+</head>
+<body>
+  <div id="delivery-auth-loading" class="auth-state"><span class="spinner"></span><p>Checking administrator access…</p></div>
+  <div id="delivery-auth-error" class="auth-state hidden"><div class="auth-error-card"><img src="/ae-trace-emblem.png" alt="AE-Trace"><h1>Delivery Report</h1><p id="delivery-auth-message">Sign in with an AE-Trace administrator account to continue.</p><a href="/">Return to AE-Trace</a></div></div>
+  <main id="delivery-app" class="delivery-shell hidden">
+    <aside class="delivery-sidebar" id="delivery-sidebar">
+      <a class="delivery-brand" href="/"><img src="/ae-trace-emblem.png" alt="AE-Trace"><span>AE-Trace<small>DELIVERY INTELLIGENCE</small></span></a>
+      <div class="delivery-workspace">REPORTING WORKSPACE</div>
+      <nav class="delivery-nav" aria-label="Delivery report navigation">
+        <button data-view="dashboard"><span>⌂</span>Dashboard</button>
+        <button data-view="overview"><span>◫</span>Overview</button>
+        <div class="delivery-nav-caption">REPORTS</div>
+        <button data-view="store-reports"><span>▤</span>Store Reports</button>
+        <button data-view="riders-reports"><span>♙</span>Riders Reports</button>
+        <div class="delivery-nav-caption">DATA</div>
+        <button data-view="data-sheet"><span>▦</span>Data Sheet</button>
+      </nav>
+      <div class="delivery-sidebar-bottom"><a class="back-fleet" href="/#overview">← Back to Fleet Operations</a><div class="delivery-user"><span id="delivery-avatar">A</span><div><b id="delivery-user-name">Administrator</b><small>Administrator</small></div><button id="delivery-signout" title="Sign out" aria-label="Sign out">↗</button></div></div>
+    </aside>
+    <section class="delivery-main">
+      <header class="delivery-topbar"><button id="delivery-menu" class="delivery-menu" aria-label="Open menu">☰</button><div class="delivery-breadcrumb"><span>Delivery Report</span><b>/</b><strong id="delivery-page-label">Dashboard</strong></div><div class="delivery-top-meta"><span class="data-status"><i></i><span id="delivery-count-label">Loading report data</span></span><button id="delivery-refresh" class="refresh-button">↻ <span>Refresh</span></button></div></header>
+      <div class="delivery-content">
+        <section class="delivery-page active" id="view-dashboard" data-title="Dashboard">
+          <div class="delivery-heading"><div><p class="delivery-eyebrow">DELIVERY OPERATIONS</p><h1>Dashboard</h1><p>At-a-glance delivery performance from your imported order sheet.</p></div><button class="accent-button" data-open-sheet>＋ Paste delivery data</button></div>
+          <div class="delivery-stats"><article><span>Total orders</span><strong id="stat-orders">—</strong><small>Imported delivery records</small></article><article><span>Delivered</span><strong id="stat-delivered">—</strong><small>Orders marked delivered</small></article><article><span>Stores</span><strong id="stat-stores">—</strong><small>Stores represented</small></article><article><span>Delivery value</span><strong id="stat-value">—</strong><small>Sum of imported values</small></article></div>
+          <div class="delivery-grid"><article class="delivery-card"><div class="card-heading"><div><h2>Delivery status</h2><p>Imported order status mix</p></div></div><div id="status-breakdown" class="status-breakdown"><div class="empty-note">Import data to see the breakdown.</div></div></article><article class="delivery-card"><div class="card-heading"><div><h2>Quick start</h2><p>Set up this reporting workspace</p></div></div><div class="quick-steps"><div><b>01</b><span>Paste rows copied from your spreadsheet</span></div><div><b>02</b><span>Review imported orders in the Data Sheet</span></div><div><b>03</b><span>Explore store and rider summaries</span></div></div><button class="text-button" data-open-sheet>Open Data Sheet →</button></article></div>
+          <article class="delivery-card table-card"><div class="card-heading"><div><h2>Latest orders</h2><p>Most recently imported records</p></div><button class="text-button" data-go-view="data-sheet">View Data Sheet →</button></div><div class="table-scroll"><table><thead><tr><th>ORDER NO</th><th>DATE</th><th>CUSTOMER</th><th>STORE</th><th>RIDER</th><th>STATUS</th><th>VALUE</th></tr></thead><tbody id="dashboard-latest"></tbody></table></div></article>
+        </section>
+        <section class="delivery-page" id="view-overview" data-title="Overview">
+          <div class="delivery-heading"><div><p class="delivery-eyebrow">DELIVERY OPERATIONS</p><h1>Overview</h1><p>Imported delivery totals and recent order activity.</p></div></div>
+          <div class="delivery-stats"><article><span>Valid orders</span><strong id="overview-valid">—</strong><small>Marked valid</small></article><article><span>Not valid</span><strong id="overview-invalid">—</strong><small>Marked no or invalid</small></article><article><span>Riders</span><strong id="overview-riders">—</strong><small>Drivers in imported data</small></article><article><span>MBD total</span><strong id="overview-mbd">—</strong><small>Sum of MBD column</small></article></div>
+          <article class="delivery-card"><div class="card-heading"><div><h2>Recent activity</h2><p>Latest imported delivery records</p></div></div><div class="table-scroll"><table><thead><tr><th>DATE</th><th>TIME</th><th>CUSTOMER</th><th>SOURCE</th><th>STORE</th><th>RIDER</th><th>STATUS</th><th>VALID</th></tr></thead><tbody id="overview-latest"></tbody></table></div></article>
+        </section>
+        <section class="delivery-page" id="view-store-reports" data-title="Store Reports">
+          <div class="delivery-heading"><div><p class="delivery-eyebrow">PERFORMANCE BY LOCATION</p><h1>Store Reports</h1><p>Delivery volume and value grouped by store.</p></div></div>
+          <article class="delivery-card table-card"><div class="card-heading"><div><h2>Store summary</h2><p>Based on imported delivery data</p></div></div><div class="table-scroll"><table><thead><tr><th>STORE</th><th>ORDERS</th><th>DELIVERED</th><th>VALID</th><th>VALUE</th><th>MBD</th></tr></thead><tbody id="store-report-rows"></tbody></table></div></article>
+        </section>
+        <section class="delivery-page" id="view-riders-reports" data-title="Riders Reports">
+          <div class="delivery-heading"><div><p class="delivery-eyebrow">PERFORMANCE BY RIDER</p><h1>Riders Reports</h1><p>Delivery volume and value grouped by driver.</p></div></div>
+          <article class="delivery-card table-card"><div class="card-heading"><div><h2>Rider summary</h2><p>Based on the Driver Name column in your data</p></div></div><div class="table-scroll"><table><thead><tr><th>RIDER</th><th>ORDERS</th><th>DELIVERED</th><th>VALID</th><th>VALUE</th><th>MBD</th></tr></thead><tbody id="rider-report-rows"></tbody></table></div></article>
+        </section>
+        <section class="delivery-page" id="view-data-sheet" data-title="Data Sheet">
+          <div class="delivery-heading"><div><p class="delivery-eyebrow">SOURCE DATA</p><h1>Data Sheet</h1><p>Paste rows copied from Excel or Google Sheets. The header row should match the columns below.</p></div><button id="data-sheet-refresh" class="refresh-button">↻ <span>Reload data</span></button></div>
+          <article class="delivery-card paste-card"><div class="paste-title"><div><h2>Paste spreadsheet rows</h2><p>Include the header row. Tab-separated spreadsheet copy and CSV are supported.</p></div><span class="paste-badge">EXCEL · CSV</span></div><div class="column-guide">Order No/ · Date · Time · Customers Name · Source · Store · Driver Name · Status · Value · MBD · Valid</div><textarea id="delivery-paste" spellcheck="false" placeholder="Order No/&#9;Date&#9;Time&#9;Customers Name&#9;Source&#9;Store&#9;Driver Name&#9;Status&#9;Value&#9;MBD&#9;Valid&#10;[&quot;97&quot;,&quot;58451223&quot;]&#9;2026-08-10&#9;18:11:53&#9;Rema&#9;AURA-Invoicing&#9;Zambia Debonairs Solwezi&#9;Martin chinga&#9;Delivered&#9;K534.00&#9;-32&#9;Yes"></textarea><div class="paste-actions"><span id="paste-feedback" role="status">Paste your rows into the box above.</span><button id="preview-paste" class="secondary-button">Preview rows</button><button id="import-paste" class="accent-button" disabled>Import rows</button></div></article>
+          <article class="delivery-card table-card"><div class="card-heading"><div><h2>Imported data</h2><p><span id="sheet-row-count">0</span> records available to reports</p></div><button id="export-delivery-csv" class="text-button">Export CSV ↓</button></div><div class="table-scroll"><table><thead><tr><th>ORDER NO</th><th>DATE</th><th>TIME</th><th>CUSTOMER</th><th>SOURCE</th><th>STORE</th><th>DRIVER NAME</th><th>STATUS</th><th>VALUE</th><th>MBD</th><th>VALID</th></tr></thead><tbody id="delivery-sheet-rows"></tbody></table></div></article>
+        </section>
+        <footer class="delivery-footer"><span>© 2026 AE-Trace · Delivery Intelligence</span><span>Administrator access only</span></footer>
+      </div>
+    </section>
+  </main>
+  <div class="delivery-scrim" id="delivery-scrim"></div><div class="delivery-toast" id="delivery-toast" role="status"></div>
+  <script type="module" src="/delivery-report.js"></script>
+</body>
+</html>

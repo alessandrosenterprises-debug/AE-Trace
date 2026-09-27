@@ -102,3 +102,7 @@ Admin APIs require `Authorization: Bearer <Supabase access token>` and administr
 The rider app asks for the admin-generated one-time code, full name, store/branch, phone number, and an optional profile photo. Device model, platform, app version, and current battery are collected on enrollment. Set EXPO_PUBLIC_API_URL in the Expo app environment before starting/building the app; the rider does not enter the backend address. For Expo Go on a local network, set HOST=0.0.0.0 in the backend environment and keep the phone and development computer on the same network. Apply all Supabase migrations before using rider self-registration, photos, or saved fleet settings. Admin Settings lets an administrator set the display name, change password, tune offline/battery/stale-location alert thresholds, and set the rider app's location update interval. Rider app interval changes take effect on the next app start.
 
 See [rider-app/README.md](rider-app/README.md) for Expo preview and location-sharing limits.
+
+## Delivery Report
+
+The administrator sidebar opens the separate `/delivery-report` workspace. It includes Dashboard, Overview, Store Reports, Riders Reports, and a Data Sheet that accepts tab-separated spreadsheet paste or CSV with the Order No/, Date, Time, Customers Name, Source, Store, Driver Name, Status, Value, MBD, and Valid columns. Imported rows are stored in Supabase and are available to all authorized administrators. Apply `supabase/migrations/202609270001_delivery_report.sql` in the Supabase SQL Editor before importing data.
