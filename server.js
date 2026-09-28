@@ -279,10 +279,11 @@ app.get('/api/reports/summary',requireAdmin,async(req,res)=>{
 });
 app.get('/api/delivery-report/orders', requireAdmin, async (req, res) => {
   try {
-    const limit = Math.max(1, Math.min(5000, Number(req.query.limit) || 2000));
-    const { data, error } = await db.from('delivery_report_orders').select('*').order('delivery_date', { ascending: false, nullsFirst: false }).order('id', { ascending: false }).limit(limit);
+    const limit = Math.max(1, Math.min(1000, Number(req.query.limit) || 1000));
+    const offset = Math.max(0, Math.min(10000000, Number(req.query.offset) || 0));
+    const { data, count, error } = await db.from('delivery_report_orders').select('*', { count: offset === 0 ? 'exact' : undefined }).order('delivery_date', { ascending: false, nullsFirst: false }).order('id', { ascending: false }).range(offset, offset + limit - 1);
     if (error) return deliveryReportFail(res, error, 'Could not load delivery report data');
-    res.json(data.map(row => ({ id: row.id, orderNo: row.order_no, date: row.delivery_date, time: row.delivery_time, customerName: row.customer_name, source: row.source, store: row.store, driverName: row.driver_name, status: row.status, valueCurrency: row.value_currency, valueAmount: row.value_amount, mbd: row.mbd, valid: row.valid, createdAt: row.created_at })));
+    res.json({ rows: data.map(row => ({ id: row.id, orderNo: row.order_no, date: row.delivery_date, time: row.delivery_time, customerName: row.customer_name, source: row.source, store: row.store, driverName: row.driver_name, status: row.status, valueCurrency: row.value_currency, valueAmount: row.value_amount, mbd: row.mbd, valid: row.valid, createdAt: row.created_at })), total: count });
   } catch (error) { return deliveryReportFail(res, error, 'Could not load delivery report data'); }
 });
 function deliveryReportFail(res, error, message) {
@@ -295,7 +296,7 @@ function deliveryReportFail(res, error, message) {
 app.post('/api/delivery-report/orders/import', requireAdmin, async (req, res) => {
   try {
     const rows = req.body?.rows;
-    if (!Array.isArray(rows) || rows.length < 1 || rows.length > 5000) return res.status(400).json({ error: 'Paste between 1 and 5,000 data rows per import.' });
+    if (!Array.isArray(rows) || rows.length < 1 || rows.length > 1000) return res.status(400).json({ error: 'Import between 1 and 1,000 data rows per batch.' });
     const clean = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) || null : null;
     const imported = [];
     for (let index = 0; index < rows.length; index++) {

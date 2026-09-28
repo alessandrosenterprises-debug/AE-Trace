@@ -3,7 +3,10 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.117.1';
 const $ = selector => document.querySelector(selector);
 let supabase;
 let orders = [];
+let totalOrderCount = 0;
 let previewRows = [];
+let previewSource = '';
+let importedRowsInPreview = 0;
 let riderMonthData = [];
 let riderRoster = [];
 let storeTargets = new Map();
@@ -16,6 +19,9 @@ let toastTimer;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const money = (currency, amount) => amount == null || amount === '' ? '—' : `${currency || 'K'}${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const num = value => Number(value || 0);
+const IMPORT_BATCH_SIZE = 500;
+const MAX_IMPORT_ROWS = 100000;
+const ORDER_PAGE_SIZE = 1000;
 const delivered = row => /delivered/i.test(row.status || '');
 const valid = row => /^(yes|true|valid|1)$/i.test(String(row.valid || '').trim());
 const normalizedName = value => String(value || '').normalize('NFKC').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
@@ -334,12 +340,11 @@ async function loadStoreTargets() {
 async function loadRiderReportData() {
   const month = $('#rider-report-month').value;
   if (riderDataMonth === month) { renderRiderReport(); return; }
-  const result = await api(`/api/delivery-report/rider-orders?month=${encodeURIComponent(month)}`);
+  const rows = orders.filter(row => row.date?.slice(0, 7) === month);
   if ($('#rider-report-month').value !== month) return;
-  riderMonthData = result.rows;
+  riderMonthData = rows.map(row => ({ driverName: row.driverName, store: row.store, valid: row.valid, mbd: row.mbd, date: row.date }));
   riderDataMonth = month;
   renderRiderReport();
-  if (result.truncated) showToast('This report is limited to 20,000 orders for the selected month.');
 }
 
 async function loadRiderMonth() {
@@ -391,18 +396,34 @@ function renderOverview() {
 }
 
 function renderSheet() {
-  $('#sheet-row-count').textContent = orders.length.toLocaleString();
-  $('#delivery-sheet-rows').innerHTML = orders.length ? orders.map(row => `<tr><td>${esc(row.orderNo)}</td><td>${esc(row.date || '—')}</td><td>${esc(row.time || '—')}</td><td>${esc(row.customerName || '—')}</td><td>${esc(row.source || '—')}</td><td>${esc(row.store || '—')}</td><td>${esc(row.driverName || '—')}</td><td>${esc(row.status || '—')}</td><td>${esc(money(row.valueCurrency, row.valueAmount))}</td><td>${row.mbd == null ? '—' : esc(row.mbd)}</td><td>${esc(row.valid || '—')}</td></tr>`).join('') : emptyRow(11);
+  $('#sheet-row-count').textContent = totalOrderCount.toLocaleString();
+  $('#delivery-sheet-rows').innerHTML = orders.length ? orders.slice(0, ORDER_PAGE_SIZE).map(row => `<tr><td>${esc(row.orderNo)}</td><td>${esc(row.date || '—')}</td><td>${esc(row.time || '—')}</td><td>${esc(row.customerName || '—')}</td><td>${esc(row.source || '—')}</td><td>${esc(row.store || '—')}</td><td>${esc(row.driverName || '—')}</td><td>${esc(row.status || '—')}</td><td>${esc(money(row.valueCurrency, row.valueAmount))}</td><td>${row.mbd == null ? '—' : esc(row.mbd)}</td><td>${esc(row.valid || '—')}</td></tr>`).join('') : emptyRow(11);
 }
 
 function renderAll() {
   renderDashboard(); renderOverview(); reportTable(groupRows('store'), '#store-report-rows'); renderRiderReport(); renderSheet();
-  $('#delivery-count-label').textContent = `${orders.length.toLocaleString()} imported records`;
+  $('#delivery-count-label').textContent = `${totalOrderCount.toLocaleString()} imported records`;
+}
+
+async function fetchAllOrders() {
+  const firstPage = await api(`/api/delivery-report/orders?limit=${ORDER_PAGE_SIZE}&offset=0`);
+  const total = Number(firstPage.total) || firstPage.rows.length;
+  const rows = [...firstPage.rows];
+  const pageCount = Math.ceil(total / ORDER_PAGE_SIZE);
+  for (let firstPageIndex = 1; firstPageIndex < pageCount; firstPageIndex += 8) {
+    const pageIndexes = Array.from({ length: Math.min(8, pageCount - firstPageIndex) }, (_, index) => firstPageIndex + index);
+    const pages = await Promise.all(pageIndexes.map(pageIndex => api(`/api/delivery-report/orders?limit=${ORDER_PAGE_SIZE}&offset=${pageIndex * ORDER_PAGE_SIZE}`)));
+    rows.push(...pages.flatMap(page => page.rows));
+    $('#delivery-count-label').textContent = `Loading reports · ${rows.length.toLocaleString()} of ${total.toLocaleString()}`;
+  }
+  return { rows, total };
 }
 
 async function loadOrders() {
   try {
-    orders = await api('/api/delivery-report/orders?limit=5000');
+    const loaded = await fetchAllOrders();
+    orders = loaded.rows;
+    totalOrderCount = loaded.total;
     const selectedMonth = $('#rider-report-month')?.value;
     if (!riderMonthManuallySelected && selectedMonth && !orders.some(row => row.date?.slice(0, 7) === selectedMonth)) {
       const latestMonth = orders.find(row => row.date)?.date.slice(0, 7);
@@ -564,18 +585,21 @@ async function boot() {
       finally { button.disabled = false; button.textContent = 'Import roster rows'; }
     });
     $('#delivery-paste').addEventListener('input', () => {
-      previewRows = []; $('#import-paste').disabled = true;
+      previewRows = []; previewSource = ''; importedRowsInPreview = 0; $('#import-paste').disabled = true;
       $('#paste-feedback').textContent = 'Preview your updated rows before importing.'; $('#paste-feedback').style.color = '';
     });
     $('#preview-paste').addEventListener('click', () => {
       try {
-        previewRows = rowsFromPaste($('#delivery-paste').value);
-        if (previewRows.length > 5000) throw new Error('Import 5,000 rows or fewer at a time.');
-        $('#paste-feedback').textContent = `${previewRows.length.toLocaleString()} rows ready to import.`;
+        const source = $('#delivery-paste').value;
+        previewRows = rowsFromPaste(source);
+        if (previewRows.length > MAX_IMPORT_ROWS) throw new Error(`Import ${MAX_IMPORT_ROWS.toLocaleString()} rows or fewer at a time.`);
+        if (previewSource !== source) importedRowsInPreview = 0;
+        previewSource = source;
+        $('#paste-feedback').textContent = importedRowsInPreview ? `${importedRowsInPreview.toLocaleString()} of ${previewRows.length.toLocaleString()} rows already imported. Ready to continue.` : `${previewRows.length.toLocaleString()} rows ready to import.`;
         $('#paste-feedback').style.color = '#77e1bf';
-        $('#import-paste').disabled = false;
+        $('#import-paste').disabled = importedRowsInPreview >= previewRows.length;
       } catch (error) {
-        previewRows = []; $('#import-paste').disabled = true;
+        previewRows = []; previewSource = ''; importedRowsInPreview = 0; $('#import-paste').disabled = true;
         $('#paste-feedback').textContent = error.message; $('#paste-feedback').style.color = '#ffac8a';
       }
     });
@@ -584,12 +608,22 @@ async function boot() {
       if (!previewRows.length || button.disabled) return;
       button.disabled = true; button.textContent = 'Importing…';
       try {
-        const result = await api('/api/delivery-report/orders/import', { method: 'POST', body: JSON.stringify({ rows: previewRows }) });
-        $('#delivery-paste').value = ''; previewRows = [];
-        $('#paste-feedback').textContent = `${result.imported} rows imported successfully.`; $('#paste-feedback').style.color = '#77e1bf';
-        showToast(`${result.imported} delivery rows imported`); await loadOrders();
-      } catch (error) { showToast(error.message); $('#paste-feedback').textContent = error.message; $('#paste-feedback').style.color = '#ffac8a'; }
-      finally { button.disabled = true; button.textContent = 'Import rows'; }
+        while (importedRowsInPreview < previewRows.length) {
+          const rows = previewRows.slice(importedRowsInPreview, importedRowsInPreview + IMPORT_BATCH_SIZE);
+          const result = await api('/api/delivery-report/orders/import', { method: 'POST', body: JSON.stringify({ rows }) });
+          importedRowsInPreview += result.imported;
+          $('#paste-feedback').textContent = `Importing ${importedRowsInPreview.toLocaleString()} of ${previewRows.length.toLocaleString()} rows…`;
+        }
+        const imported = importedRowsInPreview;
+        $('#delivery-paste').value = ''; previewRows = []; previewSource = ''; importedRowsInPreview = 0;
+        $('#paste-feedback').textContent = `${imported.toLocaleString()} rows imported successfully.`; $('#paste-feedback').style.color = '#77e1bf';
+        showToast(`${imported.toLocaleString()} delivery rows imported`); await loadOrders();
+      } catch (error) {
+        showToast(error.message);
+        $('#paste-feedback').textContent = `${importedRowsInPreview.toLocaleString()} of ${previewRows.length.toLocaleString()} rows imported. Retry to continue. ${error.message}`;
+        $('#paste-feedback').style.color = '#ffac8a';
+      }
+      finally { button.disabled = !previewRows.length || importedRowsInPreview >= previewRows.length; button.textContent = importedRowsInPreview ? 'Continue import' : 'Import rows'; }
     });
     $('#export-delivery-csv').addEventListener('click', () => {
       const columns = [['Order No/', 'orderNo'], ['Date', 'date'], ['Time', 'time'], ['Customers Name', 'customerName'], ['Source', 'source'], ['Store', 'store'], ['Driver Name', 'driverName'], ['Status', 'status'], ['Value', 'value'], ['MBD', 'mbd'], ['Valid', 'valid']];
