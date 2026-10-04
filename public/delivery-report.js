@@ -1,6 +1,15 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.117.1';
 
 const $ = selector => document.querySelector(selector);
+const listen = (selector, eventName, handler, options) => {
+  const element = $(selector);
+  if (!element) {
+    console.error(`Delivery Report control is missing: ${selector}`);
+    return false;
+  }
+  element.addEventListener(eventName, handler, options);
+  return true;
+};
 let supabase;
 let orders = [];
 let totalOrderCount = 0;
@@ -646,18 +655,18 @@ async function boot() {
       if (event.target.closest('#delivery-menu')) { $('#delivery-sidebar').classList.toggle('open'); $('#delivery-scrim').classList.toggle('show'); return; }
       if (event.target.id === 'delivery-scrim') { $('#delivery-sidebar').classList.remove('open'); $('#delivery-scrim').classList.remove('show'); }
     });
-    $('#delivery-signout').addEventListener('click', async () => { await supabase.auth.signOut(); window.location.assign('/'); });
-    $('#delivery-refresh').addEventListener('click', loadOrders);
-    $('#data-sheet-refresh').addEventListener('click', loadOrders);
-    $('#dashboard-date-from').addEventListener('change', () => { dashboardDatesManuallyChanged = true; dashboardMetricRange = ''; renderDashboard(); loadDashboardMetrics().catch(error => showToast(error.message)); });
-    $('#dashboard-date-to').addEventListener('change', () => { dashboardDatesManuallyChanged = true; dashboardMetricRange = ''; renderDashboard(); loadDashboardMetrics().catch(error => showToast(error.message)); });
-    $('#dashboard-store-mode').addEventListener('change', event => {
+    listen('#delivery-signout', 'click', async () => { await supabase.auth.signOut(); window.location.assign('/'); });
+    listen('#delivery-refresh', 'click', loadOrders);
+    listen('#data-sheet-refresh', 'click', loadOrders);
+    listen('#dashboard-date-from', 'change', () => { dashboardDatesManuallyChanged = true; dashboardMetricRange = ''; renderDashboard(); loadDashboardMetrics().catch(error => showToast(error.message)); });
+    listen('#dashboard-date-to', 'change', () => { dashboardDatesManuallyChanged = true; dashboardMetricRange = ''; renderDashboard(); loadDashboardMetrics().catch(error => showToast(error.message)); });
+    listen('#dashboard-store-mode', 'change', event => {
       const picker = $('#dashboard-store-picker');
       if (event.currentTarget.value !== 'all' && !picker.selectedOptions.length && picker.options.length) picker.options[0].selected = true;
       if (event.currentTarget.value === 'single' && picker.selectedOptions.length > 1) [...picker.selectedOptions].slice(1).forEach(option => { option.selected = false; });
       renderDashboard();
     });
-    $('#dashboard-store-picker').addEventListener('change', event => {
+    listen('#dashboard-store-picker', 'change', event => {
       if ($('#dashboard-store-mode').value === 'single' && event.currentTarget.selectedOptions.length > 1) {
         const latest = event.currentTarget.selectedOptions.at(-1).value;
         [...event.currentTarget.options].forEach(option => { option.selected = option.value === latest; });
@@ -678,14 +687,14 @@ async function boot() {
       if (storeReportMode === 'weekly' && $('#store-report-start').value) $('#store-report-month').value = $('#store-report-start').value.slice(0, 7);
       try { await loadStoreReportData(); } catch (error) { showToast(error.message); }
     }));
-    $('#store-report-month').addEventListener('change', async () => { try { await loadStoreReportData(); } catch (error) { showToast(error.message); } });
-    $('#store-report-start').addEventListener('change', async event => {
+    listen('#store-report-month', 'change', async () => { try { await loadStoreReportData(); } catch (error) { showToast(error.message); } });
+    listen('#store-report-start', 'change', async event => {
       if (event.currentTarget.value) $('#store-report-month').value = event.currentTarget.value.slice(0, 7);
       try { await loadStoreReportData(); } catch (error) { showToast(error.message); }
     });
-    $('#store-report-end').addEventListener('change', async () => { try { await loadStoreReportData(); } catch (error) { showToast(error.message); } });
-    $('#store-input-month').addEventListener('change', async event => { try { await loadMonthlyStoreMetrics(event.currentTarget.value); } catch (error) { showToast(error.message); } });
-    $('#save-store-inputs').addEventListener('click', async event => {
+    listen('#store-report-end', 'change', async () => { try { await loadStoreReportData(); } catch (error) { showToast(error.message); } });
+    listen('#store-input-month', 'change', async event => { try { await loadMonthlyStoreMetrics(event.currentTarget.value); } catch (error) { showToast(error.message); } });
+    listen('#save-store-inputs', 'click', async event => {
       const button = event.currentTarget;
       const metrics = [...document.querySelectorAll('#store-input-rows tr[data-store]')].map(row => {
         const field = name => row.querySelector(`[data-field="${name}"]`).value.trim();
@@ -704,13 +713,13 @@ async function boot() {
       } catch (error) { showToast(error.message); }
       finally { button.disabled = false; button.textContent = 'Save monthly inputs'; }
     });
-    $('#export-store-report').addEventListener('click', () => {
+    listen('#export-store-report', 'click', () => {
       const columns = ['STORE','TARGET','ACTUAL','VALID','INVALID','% DELIVERED','% ON-TIME','% AUTO ASSIGN','AVG PREP TIME','NOT DELIVERED','BELOW TARGET','% TARGET ACHIEVED','ONLINE ORDERS','LIVE TRACKING','FAILED ORDERS','FAILED REVENUE','% FAILED','FAILED REASON'];
       const rows = [...document.querySelectorAll('#store-report-rows tr')].filter(row => row.children.length === columns.length).map(row => [...row.children].map(cell => cell.innerText.trim()));
       const csv = [columns, ...rows].map(row => row.map(cell => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(',')).join('\r\n');
       const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = `ae-trace-store-${storeReportMode}-report-${$('#store-report-month').value}.csv`; link.click(); URL.revokeObjectURL(url);
     });
-    $('#delivery-file')?.addEventListener('change', async event => {
+    listen('#delivery-file', 'change', async event => {
       const file = event.currentTarget.files?.[0];
       if (!file) return;
       if (file.size > 100 * 1024 * 1024) {
@@ -732,13 +741,13 @@ async function boot() {
     });
     $('#rider-report-month').value = monthNow();
     $('#store-target-month').value = monthNow();
-    $('#rider-report-month').addEventListener('change', async event => {
+    listen('#rider-report-month', 'change', async event => {
       try { await selectReportMonth(event.currentTarget.value); } catch (error) { showToast(error.message); }
     });
-    $('#store-target-month').addEventListener('change', async event => {
+    listen('#store-target-month', 'change', async event => {
       try { await selectReportMonth(event.currentTarget.value); } catch (error) { showToast(error.message); }
     });
-    $('#save-store-targets').addEventListener('click', async event => {
+    listen('#save-store-targets', 'click', async event => {
       const button = event.currentTarget;
       const targets = [];
       for (const input of document.querySelectorAll('.store-target-input')) {
@@ -759,7 +768,7 @@ async function boot() {
       } catch (error) { showToast(error.message); }
       finally { button.disabled = false; button.textContent = 'Save targets'; }
     });
-    $('#add-target-store').addEventListener('click', () => {
+    listen('#add-target-store', 'click', () => {
       const input = $('#new-target-store');
       const storeName = input.value.trim();
       if (!storeName) { showToast('Enter a store name first.'); input.focus(); return; }
@@ -769,17 +778,17 @@ async function boot() {
       input.value = ''; renderStoreTargets();
       document.querySelectorAll('.store-target-input').forEach(targetInput => { if (normalizedName(targetInput.dataset.store) === key) targetInput.focus(); });
     });
-    $('#export-rider-report').addEventListener('click', () => {
+    listen('#export-rider-report', 'click', () => {
       const columns = ['RANK', 'NAMES', 'STORE BELONG TO', 'TARGET', 'ACHIEVED', 'VALID', 'INVALID', 'ONTIME %', 'TARGET BALANCE', 'COMMENT'];
       const rows = [...document.querySelectorAll('#rider-report-rows tr')].filter(row => row.children.length === 10).map(row => [...row.children].map(cell => cell.innerText.trim()));
       const csv = [columns, ...rows].map(row => row.map(cell => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(',')).join('\r\n');
       const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = `ae-trace-rider-report-${$('#rider-report-month').value}.csv`; link.click(); URL.revokeObjectURL(url);
     });
-    $('#add-roster-rider').addEventListener('click', () => {
+    listen('#add-roster-rider', 'click', () => {
       riderRoster.push({ riderName: '', homeStore: '' }); renderRiderRoster();
       $('#rider-roster-rows tr:last-child .roster-name-input')?.focus();
     });
-    $('#rider-roster-rows').addEventListener('click', async event => {
+    listen('#rider-roster-rows', 'click', async event => {
       const button = event.target.closest('[data-remove-roster]');
       if (!button) return;
       const row = button.closest('tr');
@@ -790,7 +799,7 @@ async function boot() {
       try { await api(`/api/delivery-report/rider-roster/${encodeURIComponent(originalName)}`, { method: 'DELETE' }); await loadRiderRoster(); showToast(`${originalName} removed from the roster.`); }
       catch (error) { showToast(error.message); button.disabled = false; }
     });
-    $('#save-roster').addEventListener('click', async event => {
+    listen('#save-roster', 'click', async event => {
       const button = event.currentTarget;
       const riders = [];
       const names = new Map();
@@ -816,7 +825,7 @@ async function boot() {
       } catch (error) { showToast(error.message); }
       finally { button.disabled = false; button.textContent = 'Save roster'; }
     });
-    $('#import-roster').addEventListener('click', async event => {
+    listen('#import-roster', 'click', async event => {
       const button = event.currentTarget;
       let parsed;
       try { parsed = rosterRowsFromPaste($('#roster-paste').value); }
@@ -849,11 +858,11 @@ async function boot() {
       }
       finally { button.disabled = false; button.textContent = 'Import roster rows'; }
     });
-    $('#delivery-paste').addEventListener('input', () => {
+    listen('#delivery-paste', 'input', () => {
       previewRows = []; previewSource = ''; importedRowsInPreview = 0; $('#import-paste').disabled = true;
       $('#paste-feedback').textContent = 'Preview your updated rows before importing.'; $('#paste-feedback').style.color = '';
     });
-    $('#preview-paste').addEventListener('click', () => {
+    listen('#preview-paste', 'click', () => {
       try {
         const source = $('#delivery-paste').value;
         previewRows = rowsFromPaste(source);
@@ -868,7 +877,7 @@ async function boot() {
         $('#paste-feedback').textContent = error.message; $('#paste-feedback').style.color = '#ffac8a';
       }
     });
-    $('#import-paste').addEventListener('click', async event => {
+    listen('#import-paste', 'click', async event => {
       const button = event.currentTarget;
       if (!previewRows.length || button.disabled) return;
       button.disabled = true; button.textContent = 'Importing…';
@@ -890,7 +899,7 @@ async function boot() {
       }
       finally { button.disabled = !previewRows.length || importedRowsInPreview >= previewRows.length; button.textContent = importedRowsInPreview ? 'Continue import' : 'Import rows'; }
     });
-    $('#export-delivery-csv').addEventListener('click', () => {
+    listen('#export-delivery-csv', 'click', () => {
       const columns = [['Order No/', 'orderNo'], ['Date', 'date'], ['Time', 'time'], ['Customers Name', 'customerName'], ['Source', 'source'], ['Store', 'store'], ['Driver Name', 'driverName'], ['Status', 'status'], ['Value', 'value'], ['MBD', 'mbd'], ['Valid', 'valid']];
       const csv = [columns.map(([name]) => name), ...orders.map(row => columns.map(([, key]) => key === 'value' ? money(row.valueCurrency, row.valueAmount) : row[key] ?? ''))].map(row => row.map(cell => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\r\n');
       const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = `ae-trace-delivery-data-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
