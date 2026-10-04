@@ -10,6 +10,14 @@ let importedRowsInPreview = 0;
 let riderMonthData = [];
 let riderRoster = [];
 let storeTargets = new Map();
+let reportStoreTargets = new Map();
+let monthlyStoreMetrics = new Map();
+let monthlyStoreMetricsMonth = '';
+let reportMonthlyStoreMetrics = new Map();
+let dashboardMetricRows = [];
+let dashboardMetricRange = '';
+let storeReportMode = 'monthly';
+let dashboardDatesManuallyChanged = false;
 let pendingTargetStores = new Set();
 let riderTargetMonth = '';
 let riderDataMonth = '';
@@ -186,6 +194,8 @@ function setActiveView(name) {
   history.replaceState(null, '', `#${name}`);
   if (name === 'data-sheet') renderSheet();
   if (name === 'store-targets') renderStoreTargets();
+  if (name === 'store-reports') loadStoreReportData().catch(error => showToast(error.message));
+  if (name === 'store-inputs') loadMonthlyStoreMetrics($('#store-input-month').value || monthNow()).catch(error => showToast(error.message));
   if (name === 'rider-roster') renderRiderRoster();
 }
 
@@ -203,19 +213,77 @@ function emptyRow(span, text = 'No delivery data yet. Paste your spreadsheet in 
 }
 
 function renderDashboard() {
-  const count = orders.length;
-  const deliveredCount = orders.filter(delivered).length;
-  const stores = new Set(orders.map(row => row.store).filter(Boolean)).size;
+  const names = knownStoreNames();
+  const picker = $('#dashboard-store-picker');
+  const previouslySelected = [...picker.selectedOptions].map(option => option.value);
+  picker.innerHTML = names.map(name => `<option value="${esc(name)}" ${previouslySelected.includes(name) ? 'selected' : ''}>${esc(name)}</option>`).join('');
+  const mode = $('#dashboard-store-mode').value || 'all';
+  $('#dashboard-store-picker-wrap').classList.toggle('hidden', mode === 'all');
+  const selected = [...picker.selectedOptions].map(option => option.value);
+  const from = $('#dashboard-date-from').value || '0000-01-01';
+  const to = $('#dashboard-date-to').value || '9999-12-31';
+  const matchesStore = store => mode === 'all' || selected.some(name => normalizedName(name) === normalizedName(store));
+  const activeOrders = orders.filter(row => row.date && row.date >= from && row.date <= to && matchesStore(row.store));
+  const fromMonth = from.slice(0, 7), toMonth = to.slice(0, 7);
+  const activeMetrics = dashboardMetricRows.filter(row => row.month >= fromMonth && row.month <= toMonth && matchesStore(row.storeName));
+  const aggregateMetrics = rows => {
+    const sum = field => rows.reduce((total, row) => total + (row[field] == null ? 0 : Number(row[field])), 0);
+    const average = field => {
+      const present = rows.filter(row => row[field] != null);
+      const weight = present.reduce((total, row) => total + Math.max(0, Number(row.onlineOrders) || 0), 0);
+      return weight ? present.reduce((total, row) => total + Number(row[field]) * Math.max(0, Number(row.onlineOrders) || 0), 0) / weight : present.length ? present.reduce((total, row) => total + Number(row[field]), 0) / present.length : null;
+    };
+    return { onlineOrders: sum('onlineOrders'), failedOrders: sum('failedOrders'), failedRevenue: sum('failedRevenue'), live: average('liveTrackingPercent'), failedPercent: average('failedPercent') };
+  };
+  const count = activeOrders.length;
+  const deliveredCount = activeOrders.filter(delivered).length;
+  const stores = new Set(activeOrders.map(row => row.store).filter(Boolean));
+  const manualTotals = aggregateMetrics(activeMetrics);
   $('#stat-orders').textContent = count.toLocaleString();
-  $('#stat-delivered').textContent = deliveredCount.toLocaleString();
-  $('#stat-stores').textContent = stores.toLocaleString();
-  $('#stat-value').textContent = totalByCurrency(orders);
+  $('#stat-delivered').textContent = count ? `${Math.round(deliveredCount / count * 100)}%` : '—';
+  $('#dashboard-valid').textContent = activeOrders.filter(valid).length.toLocaleString();
+  $('#dashboard-invalid').textContent = activeOrders.filter(row => /^(no|false|invalid|0)$/i.test(String(row.valid || '').trim())).length.toLocaleString();
+  $('#stat-stores').textContent = stores.size.toLocaleString();
+  $('#stat-value').textContent = totalByCurrency(activeOrders);
+  $('#dashboard-online').textContent = manualTotals.onlineOrders.toLocaleString();
+  $('#dashboard-live').textContent = manualTotals.live == null ? '—' : `${manualTotals.live.toFixed(1)}%`;
+  $('#dashboard-failed').textContent = manualTotals.failedOrders.toLocaleString();
+  $('#dashboard-failed-revenue').textContent = `ZMK ${Number(manualTotals.failedRevenue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  $('#dashboard-failed-rate').textContent = manualTotals.failedPercent == null ? '—' : `${manualTotals.failedPercent.toFixed(1)}%`;
+  const modeLabel = mode === 'all' ? 'All stores' : selected.length === 1 ? selected[0] : `${selected.length} selected stores`;
+  $('#dashboard-scope-caption').textContent = `${modeLabel} · ${from} to ${to} · monthly figures for months in range`;
   const statuses = new Map();
-  for (const row of orders) { const key = row.status || 'Unspecified'; statuses.set(key, (statuses.get(key) || 0) + 1); }
+  for (const row of activeOrders) { const key = row.status || 'Unspecified'; statuses.set(key, (statuses.get(key) || 0) + 1); }
   const statusRows = [...statuses].sort((a, b) => b[1] - a[1]);
-  $('#status-breakdown').innerHTML = statusRows.length ? statusRows.slice(0, 5).map(([status, value]) => `<div class="status-line"><span>${esc(status)}</span><div class="status-track"><div class="status-fill" style="width:${Math.max(3, value / count * 100)}%"></div></div><b>${value}</b></div>`).join('') : '<div class="empty-note">Import data to see the breakdown.</div>';
-  const recent = orders.slice(0, 8);
-  $('#dashboard-latest').innerHTML = recent.length ? recent.map(row => `<tr><td>${esc(row.orderNo)}</td><td>${esc(row.date || '—')}</td><td>${esc(row.customerName || '—')}</td><td>${esc(row.store || '—')}</td><td>${esc(row.driverName || '—')}</td><td>${esc(row.status || '—')}</td><td>${esc(money(row.valueCurrency, row.valueAmount))}</td></tr>`).join('') : emptyRow(7);
+  $('#status-breakdown').innerHTML = statusRows.length ? statusRows.slice(0, 5).map(([status, value]) => `<div class="status-line"><span>${esc(status)}</span><div class="status-track"><div class="status-fill" style="width:${Math.max(3, value / count * 100)}%"></div></div><b>${value.toLocaleString()}</b></div>`).join('') : '<div class="empty-note">No orders in this date/store selection.</div>';
+  const hourly = Array.from({ length: 24 }, () => 0);
+  for (const row of activeOrders) { const hour = Number(String(row.time || '').slice(0, 2)); if (Number.isInteger(hour) && hour >= 0 && hour < 24) hourly[hour]++; }
+  const peak = Math.max(1, ...hourly);
+  $('#dashboard-hour-bars').innerHTML = hourly.map((value, hour) => `<div class="hour-column" title="${String(hour).padStart(2, '0')}:00 · ${value} orders"><i style="height:${value ? Math.max(4, value / peak * 100) : 0}%"></i><span>${String(hour).padStart(2, '0')}</span></div>`).join('');
+  const storeNames = new Set([...activeOrders.map(row => row.store).filter(Boolean), ...activeMetrics.map(row => row.storeName).filter(Boolean)]);
+  const storeRows = [...storeNames].sort((a, b) => a.localeCompare(b)).map(store => {
+    const storeOrders = activeOrders.filter(row => normalizedName(row.store) === normalizedName(store));
+    const storeMetrics = aggregateMetrics(activeMetrics.filter(row => normalizedName(row.storeName) === normalizedName(store)));
+    const deliveredRows = storeOrders.filter(delivered).length;
+    const reason = [...new Set(activeMetrics.filter(row => normalizedName(row.storeName) === normalizedName(store)).map(row => row.failedReason?.trim()).filter(Boolean))].join('; ');
+    return `<tr><td><strong>${esc(store)}</strong></td><td>${storeOrders.length.toLocaleString()}</td><td>${storeOrders.length ? `${Math.round(deliveredRows / storeOrders.length * 100)}%` : '—'}</td><td>${storeOrders.filter(valid).length.toLocaleString()}</td><td>${storeOrders.filter(row => /^(no|false|invalid|0)$/i.test(String(row.valid || '').trim())).length.toLocaleString()}</td><td>${esc(totalByCurrency(storeOrders))}</td><td>${storeMetrics.onlineOrders.toLocaleString()}</td><td>${storeMetrics.live == null ? '—' : `${storeMetrics.live.toFixed(1)}%`}</td><td>${storeMetrics.failedOrders.toLocaleString()}</td><td>${esc(`ZMK ${Number(storeMetrics.failedRevenue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}</td><td>${storeMetrics.failedPercent == null ? '—' : `${storeMetrics.failedPercent.toFixed(1)}%`}</td><td>${esc(reason || '—')}</td></tr>`;
+  });
+  $('#dashboard-store-rows').innerHTML = storeRows.length ? storeRows.join('') : emptyRow(12, mode !== 'all' && !selected.length ? 'Choose at least one store to see this overview.' : 'No stores match this date range.');
+  const latest = activeOrders.slice(0, 8);
+  $('#dashboard-latest').innerHTML = latest.length ? latest.map(row => `<tr><td>${esc(row.orderNo)}</td><td>${esc(row.date || '—')}</td><td>${esc(row.customerName || '—')}</td><td>${esc(row.store || '—')}</td><td>${esc(row.driverName || '—')}</td><td>${esc(row.status || '—')}</td><td>${esc(money(row.valueCurrency, row.valueAmount))}</td></tr>`).join('') : emptyRow(7);
+}
+
+function knownStoreNames() {
+  const names = new Map();
+  const add = name => { if (typeof name === 'string' && name.trim()) names.set(normalizedName(name), name.trim()); };
+  orders.forEach(row => add(row.store));
+  riderRoster.forEach(row => add(row.homeStore));
+  storeTargets.forEach(row => add(row.storeName));
+  reportStoreTargets.forEach(row => add(row.storeName));
+  monthlyStoreMetrics.forEach(row => add(row.storeName));
+  reportMonthlyStoreMetrics.forEach(row => add(row.storeName));
+  dashboardMetricRows.forEach(row => add(row.storeName));
+  return [...names.values()].sort((a, b) => a.localeCompare(b));
 }
 
 function groupRows(key) {
@@ -228,13 +296,96 @@ function groupRows(key) {
   return [...groups].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
 }
 
-function reportTable(rows, target) {
-  $(target).innerHTML = rows.length ? rows.map(([name, items]) => {
+function monthBounds(month) {
+  const [year, number] = month.split('-').map(Number);
+  return { start: `${month}-01`, end: new Date(Date.UTC(year, number, 0)).toISOString().slice(0, 10), days: new Date(Date.UTC(year, number, 0)).getUTCDate() };
+}
+
+function storeReportDates() {
+  const month = $('#store-report-month').value || monthNow();
+  if (storeReportMode === 'monthly') return { ...monthBounds(month), month };
+  const start = $('#store-report-start').value, end = $('#store-report-end').value;
+  return { start, end, month, days: start && end ? Math.floor((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000) + 1 : 0 };
+}
+
+const invalidOrder = row => /^(no|false|invalid|0)$/i.test(String(row.valid || '').trim());
+
+function renderStoreReport() {
+  const { start, end, month, days } = storeReportDates();
+  if (!start || !end || end < start) { $('#store-report-rows').innerHTML = emptyRow(18, 'Choose a valid date range.'); return; }
+  const monthRange = monthBounds(month);
+  const rangeOrders = orders.filter(row => row.date && row.date >= start && row.date <= end);
+  const names = new Map();
+  const addName = name => { if (name?.trim()) names.set(normalizedName(name), name.trim()); };
+  knownStoreNames().forEach(addName);
+  rangeOrders.forEach(row => addName(row.store));
+  const metricMap = reportMonthlyStoreMetrics;
+  const rows = [...names.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([key, store]) => {
+    const items = rangeOrders.filter(row => normalizedName(row.store) === key);
+    const actual = items.length;
     const deliveredCount = items.filter(delivered).length;
     const validCount = items.filter(valid).length;
-    const mbdTotal = items.reduce((sum, row) => sum + num(row.mbd), 0);
-    return `<tr><td>${esc(name)}</td><td>${items.length}</td><td>${deliveredCount}</td><td>${validCount}</td><td>${esc(totalByCurrency(items))}</td><td>${mbdTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td></tr>`;
-  }).join('') : emptyRow(6);
+    const invalidCount = items.filter(invalidOrder).length;
+    const timed = items.filter(row => row.mbd != null && row.mbd !== '' && Number.isFinite(Number(row.mbd)));
+    const onTimeRate = timed.length ? timed.filter(row => Number(row.mbd) >= 0).length / timed.length * 100 : null;
+    const monthlyTarget = reportStoreTargets.get(key)?.target ?? null;
+    const target = monthlyTarget == null ? null : storeReportMode === 'monthly' ? Number(monthlyTarget) : Math.round(Number(monthlyTarget) * days / monthRange.days);
+    const manual = metricMap.get(key) || {};
+    return { store, actual, deliveredCount, validCount, invalidCount, onTimeRate, target, manual, value: totalByCurrency(items), notDelivered: actual - deliveredCount };
+  });
+  const pct = value => value == null ? '—' : `${value.toFixed(1)}%`;
+  $('#store-report-title').textContent = storeReportMode === 'monthly' ? 'Monthly store report' : 'Weekly store report';
+  $('#store-report-caption').textContent = `${storeReportMode === 'monthly' ? 'Imported orders in selected month' : 'Imported orders in selected week'} · manual figures use ${month}`;
+  $('#store-report-period').textContent = storeReportMode === 'monthly' ? new Date(`${month}-01T00:00:00`).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }).toUpperCase() : `${start} — ${end}`;
+  $('#store-report-rows').innerHTML = rows.length ? rows.map(row => {
+    const below = row.target == null ? '—' : (row.target - row.actual).toLocaleString();
+    const achieved = row.target ? pct(row.actual / row.target * 100) : '—';
+    return `<tr><td><strong>${esc(row.store)}</strong></td><td>${row.target == null ? '—' : row.target.toLocaleString()}</td><td>${row.actual.toLocaleString()}</td><td>${row.validCount.toLocaleString()}</td><td>${row.invalidCount.toLocaleString()}</td><td>${row.actual ? pct(row.deliveredCount / row.actual * 100) : '—'}</td><td>${pct(row.onTimeRate)}</td><td>—</td><td>—</td><td>${row.notDelivered.toLocaleString()}</td><td>${below}</td><td>${achieved}</td><td>${row.manual.onlineOrders == null ? '—' : Number(row.manual.onlineOrders).toLocaleString()}</td><td>${row.manual.liveTrackingPercent == null ? '—' : `${Number(row.manual.liveTrackingPercent).toFixed(1)}%`}</td><td>${row.manual.failedOrders == null ? '—' : Number(row.manual.failedOrders).toLocaleString()}</td><td>${row.manual.failedRevenue == null ? '—' : esc(money('ZMK ', row.manual.failedRevenue))}</td><td>${row.manual.failedPercent == null ? '—' : `${Number(row.manual.failedPercent).toFixed(1)}%`}</td><td class="store-reason">${esc(row.manual.failedReason || '—')}</td></tr>`;
+  }).join('') : emptyRow(18);
+}
+
+async function loadStoreReportData() {
+  const { month } = storeReportDates();
+  const [targets, metrics] = await Promise.all([
+    api(`/api/delivery-report/store-targets?month=${encodeURIComponent(month)}`),
+    api(`/api/delivery-report/store-monthly-metrics?month=${encodeURIComponent(month)}`),
+  ]);
+  if (storeReportDates().month !== month) return;
+  reportStoreTargets = new Map(targets.map(row => [normalizedName(row.storeName), row]));
+  reportMonthlyStoreMetrics = new Map(metrics.map(row => [normalizedName(row.storeName), row]));
+  renderStoreReport();
+  renderDashboard();
+}
+
+function renderStoreInputs() {
+  const rows = knownStoreNames();
+  $('#store-input-rows').innerHTML = rows.length ? rows.map(store => {
+    const metric = monthlyStoreMetrics.get(normalizedName(store)) || {};
+    const field = (key, label, type = 'number', step = '1', max = '') => `<input class="store-metric-input" data-field="${key}" type="${type}" ${type === 'number' ? `min="0" step="${step}" ${max ? `max="${max}"` : ''}` : 'maxlength="1000"'} aria-label="${esc(`${label} for ${store}`)}" value="${type === 'text' ? esc(metric[key] || '') : metric[key] == null ? '' : esc(metric[key])}" placeholder="—">`;
+    return `<tr data-store="${esc(store)}"><td><strong>${esc(store)}</strong></td><td>${field('onlineOrders', 'Online orders')}</td><td>${field('liveTrackingPercent', 'Live tracking %', 'number', '0.01', '100')}</td><td>${field('failedOrders', 'Failed orders')}</td><td>${field('failedRevenue', 'Failed revenue', 'number', '0.01')}</td><td>${field('failedPercent', 'Failed %', 'number', '0.01', '100')}</td><td>${field('failedReason', 'Failed reason', 'text')}</td></tr>`;
+  }).join('') : emptyRow(7, 'Import order data or add riders to the Rider Roster to list stores here.');
+}
+
+async function loadMonthlyStoreMetrics(month) {
+  if (monthlyStoreMetricsMonth === month) { renderStoreInputs(); return; }
+  const rows = await api(`/api/delivery-report/store-monthly-metrics?month=${encodeURIComponent(month)}`);
+  if ($('#store-input-month').value !== month && $('#store-report-month').value !== month) return;
+  monthlyStoreMetrics = new Map(rows.map(row => [normalizedName(row.storeName), row]));
+  monthlyStoreMetricsMonth = month;
+  renderStoreInputs(); renderDashboard();
+}
+
+async function loadDashboardMetrics() {
+  const from = $('#dashboard-date-from').value, to = $('#dashboard-date-to').value;
+  if (!from || !to || to < from) { dashboardMetricRows = []; dashboardMetricRange = ''; renderDashboard(); return; }
+  const fromMonth = from.slice(0, 7), toMonth = to.slice(0, 7);
+  const key = `${fromMonth}:${toMonth}`;
+  if (dashboardMetricRange === key) { renderDashboard(); return; }
+  dashboardMetricRange = key;
+  const rows = await api(`/api/delivery-report/store-monthly-metrics?from=${encodeURIComponent(fromMonth)}&to=${encodeURIComponent(toMonth)}`);
+  if (`${$('#dashboard-date-from').value.slice(0, 7)}:${$('#dashboard-date-to').value.slice(0, 7)}` !== key) return;
+  dashboardMetricRows = rows.map(row => ({ ...row, month: row.month }));
+  renderDashboard();
 }
 
 function monthNow() {
@@ -388,6 +539,7 @@ async function selectReportMonth(month) {
 async function loadRiderRoster() {
   riderRoster = await api('/api/delivery-report/rider-roster');
   renderRiderRoster();
+  renderStoreInputs();
   renderStoreTargets();
   renderRiderReport();
 }
@@ -424,7 +576,7 @@ function renderSheet() {
 }
 
 function renderAll() {
-  renderDashboard(); renderOverview(); reportTable(groupRows('store'), '#store-report-rows'); renderRiderReport(); renderSheet();
+  renderDashboard(); renderOverview(); renderStoreReport(); renderStoreInputs(); renderRiderReport(); renderSheet();
   $('#delivery-count-label').textContent = `${totalOrderCount.toLocaleString()} imported records`;
 }
 
@@ -456,8 +608,17 @@ async function loadOrders() {
         riderTargetMonth = '';
       }
     }
+    if (!dashboardDatesManuallyChanged) {
+      const dates = orders.map(row => row.date).filter(Boolean).sort();
+      if (dates.length) {
+        $('#dashboard-date-from').value = dates[0];
+        $('#dashboard-date-to').value = dates.at(-1);
+        dashboardMetricRange = '';
+      }
+    }
     riderDataMonth = '';
     renderAll();
+    try { await loadDashboardMetrics(); } catch (error) { showToast(error.message); }
     try { await loadRiderReportData(); } catch (error) { showToast(error.message); }
   }
   catch (error) { showToast(error.message); $('#delivery-count-label').textContent = 'Could not load report data'; }
@@ -488,6 +649,67 @@ async function boot() {
     $('#delivery-signout').addEventListener('click', async () => { await supabase.auth.signOut(); window.location.assign('/'); });
     $('#delivery-refresh').addEventListener('click', loadOrders);
     $('#data-sheet-refresh').addEventListener('click', loadOrders);
+    $('#dashboard-date-from').addEventListener('change', () => { dashboardDatesManuallyChanged = true; dashboardMetricRange = ''; renderDashboard(); loadDashboardMetrics().catch(error => showToast(error.message)); });
+    $('#dashboard-date-to').addEventListener('change', () => { dashboardDatesManuallyChanged = true; dashboardMetricRange = ''; renderDashboard(); loadDashboardMetrics().catch(error => showToast(error.message)); });
+    $('#dashboard-store-mode').addEventListener('change', event => {
+      const picker = $('#dashboard-store-picker');
+      if (event.currentTarget.value !== 'all' && !picker.selectedOptions.length && picker.options.length) picker.options[0].selected = true;
+      if (event.currentTarget.value === 'single' && picker.selectedOptions.length > 1) [...picker.selectedOptions].slice(1).forEach(option => { option.selected = false; });
+      renderDashboard();
+    });
+    $('#dashboard-store-picker').addEventListener('change', event => {
+      if ($('#dashboard-store-mode').value === 'single' && event.currentTarget.selectedOptions.length > 1) {
+        const latest = event.currentTarget.selectedOptions.at(-1).value;
+        [...event.currentTarget.options].forEach(option => { option.selected = option.value === latest; });
+      }
+      renderDashboard();
+    });
+    $('#store-report-month').value = monthNow();
+    $('#store-input-month').value = monthNow();
+    const today = new Date();
+    const monday = new Date(today); monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+    $('#store-report-start').value = monday.toISOString().slice(0, 10);
+    $('#store-report-end').value = sunday.toISOString().slice(0, 10);
+    document.querySelectorAll('[data-store-report-mode]').forEach(button => button.addEventListener('click', async () => {
+      storeReportMode = button.dataset.storeReportMode;
+      document.querySelectorAll('[data-store-report-mode]').forEach(tab => tab.classList.toggle('active', tab === button));
+      document.querySelectorAll('.weekly-report-field').forEach(field => field.classList.toggle('hidden', storeReportMode !== 'weekly'));
+      if (storeReportMode === 'weekly' && $('#store-report-start').value) $('#store-report-month').value = $('#store-report-start').value.slice(0, 7);
+      try { await loadStoreReportData(); } catch (error) { showToast(error.message); }
+    }));
+    $('#store-report-month').addEventListener('change', async () => { try { await loadStoreReportData(); } catch (error) { showToast(error.message); } });
+    $('#store-report-start').addEventListener('change', async event => {
+      if (event.currentTarget.value) $('#store-report-month').value = event.currentTarget.value.slice(0, 7);
+      try { await loadStoreReportData(); } catch (error) { showToast(error.message); }
+    });
+    $('#store-report-end').addEventListener('change', async () => { try { await loadStoreReportData(); } catch (error) { showToast(error.message); } });
+    $('#store-input-month').addEventListener('change', async event => { try { await loadMonthlyStoreMetrics(event.currentTarget.value); } catch (error) { showToast(error.message); } });
+    $('#save-store-inputs').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const metrics = [...document.querySelectorAll('#store-input-rows tr[data-store]')].map(row => {
+        const field = name => row.querySelector(`[data-field="${name}"]`).value.trim();
+        const number = name => field(name) === '' ? null : Number(field(name));
+        return { storeName: row.dataset.store, onlineOrders: number('onlineOrders'), liveTrackingPercent: number('liveTrackingPercent'), failedOrders: number('failedOrders'), failedRevenue: number('failedRevenue'), failedPercent: number('failedPercent'), failedReason: field('failedReason') };
+      });
+      button.disabled = true; button.textContent = 'Saving…';
+      try {
+        const month = $('#store-input-month').value;
+        const result = await api('/api/delivery-report/store-monthly-metrics', { method: 'PUT', body: JSON.stringify({ month, metrics }) });
+        monthlyStoreMetricsMonth = '';
+        dashboardMetricRange = '';
+        await loadMonthlyStoreMetrics(month);
+        await loadDashboardMetrics();
+        showToast(`${result.saved} stores’ monthly figures saved.`);
+      } catch (error) { showToast(error.message); }
+      finally { button.disabled = false; button.textContent = 'Save monthly inputs'; }
+    });
+    $('#export-store-report').addEventListener('click', () => {
+      const columns = ['STORE','TARGET','ACTUAL','VALID','INVALID','% DELIVERED','% ON-TIME','% AUTO ASSIGN','AVG PREP TIME','NOT DELIVERED','BELOW TARGET','% TARGET ACHIEVED','ONLINE ORDERS','LIVE TRACKING','FAILED ORDERS','FAILED REVENUE','% FAILED','FAILED REASON'];
+      const rows = [...document.querySelectorAll('#store-report-rows tr')].filter(row => row.children.length === columns.length).map(row => [...row.children].map(cell => cell.innerText.trim()));
+      const csv = [columns, ...rows].map(row => row.map(cell => `"${String(cell ?? '').replaceAll('"', '""')}"`).join(',')).join('\r\n');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = `ae-trace-store-${storeReportMode}-report-${$('#store-report-month').value}.csv`; link.click(); URL.revokeObjectURL(url);
+    });
     $('#delivery-file')?.addEventListener('change', async event => {
       const file = event.currentTarget.files?.[0];
       if (!file) return;
@@ -674,7 +896,7 @@ async function boot() {
       const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = `ae-trace-delivery-data-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
     });
     const initialView = location.hash.slice(1);
-    setActiveView(['dashboard', 'overview', 'store-reports', 'store-targets', 'riders-reports', 'rider-roster', 'data-sheet'].includes(initialView) ? initialView : 'dashboard');
+    setActiveView(['dashboard', 'overview', 'store-reports', 'store-inputs', 'store-targets', 'riders-reports', 'rider-roster', 'data-sheet'].includes(initialView) ? initialView : 'dashboard');
     $('#rider-report-month').value = monthNow();
     $('#store-target-month').value = monthNow();
     try { await loadRiderRoster(); } catch (error) { showToast(error.message); }

@@ -471,6 +471,58 @@ app.put('/api/delivery-report/store-targets', requireAdmin, async (req, res) => 
     res.json({ saved: saved.length, cleared: cleared.length });
   } catch (error) { return deliveryReportFail(res, error, 'Could not save store targets'); }
 });
+app.get('/api/delivery-report/store-monthly-metrics', requireAdmin, async (req, res) => {
+  const month = req.query.month;
+  const from = req.query.from;
+  const to = req.query.to;
+  const validMonth = value => typeof value === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+  if (month != null && !validMonth(month)) return res.status(400).json({ error: 'Choose a valid report month.' });
+  if (month == null && (!validMonth(from) || !validMonth(to) || from > to)) return res.status(400).json({ error: 'Choose a valid monthly metric range.' });
+  try {
+    let query = db.from('delivery_report_store_monthly_metrics').select('*').order('report_month').order('store_name');
+    query = month != null ? query.eq('report_month', `${month}-01`) : query.gte('report_month', `${from}-01`).lte('report_month', `${to}-01`);
+    const { data, error } = await query.limit(1000);
+    if (error) return deliveryReportFail(res, error, 'Could not load monthly store metrics');
+    res.json(data.map(row => ({ month: row.report_month.slice(0, 7), storeName: row.store_name, onlineOrders: row.online_orders, liveTrackingPercent: row.live_tracking_percent, failedOrders: row.failed_orders, failedRevenue: row.failed_revenue, failedPercent: row.failed_percent, failedReason: row.failed_reason })));
+  } catch (error) { return deliveryReportFail(res, error, 'Could not load monthly store metrics'); }
+});
+app.put('/api/delivery-report/store-monthly-metrics', requireAdmin, async (req, res) => {
+  const { month, metrics } = req.body || {};
+  if (typeof month !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: 'Choose a valid report month.' });
+  if (!Array.isArray(metrics) || metrics.length > 500) return res.status(400).json({ error: 'Invalid monthly store metric list.' });
+  const normalizedStore = value => String(value || '').normalize('NFKC').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+  const parseNumber = (value, { integer = false, max = 1000000 } = {}) => {
+    if (value == null || value === '') return null;
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < 0 || number > max || (integer && !Number.isInteger(number))) return NaN;
+    return number;
+  };
+  const saved = [];
+  const seen = new Set();
+  for (const item of metrics) {
+    const storeName = typeof item?.storeName === 'string' ? item.storeName.trim().slice(0, 160) : '';
+    if (!storeName) return res.status(400).json({ error: 'Each monthly metric row needs a store name.' });
+    const key = normalizedStore(storeName);
+    if (seen.has(key)) return res.status(400).json({ error: `Store “${storeName}” appears more than once.` });
+    seen.add(key);
+    const onlineOrders = parseNumber(item.onlineOrders, { integer: true });
+    const liveTrackingPercent = parseNumber(item.liveTrackingPercent, { max: 100 });
+    const failedOrders = parseNumber(item.failedOrders, { integer: true });
+    const failedRevenue = parseNumber(item.failedRevenue, { max: 999999999999.99 });
+    const failedPercent = parseNumber(item.failedPercent, { max: 100 });
+    if ([onlineOrders, liveTrackingPercent, failedOrders, failedRevenue, failedPercent].some(Number.isNaN)) return res.status(400).json({ error: `Check the monthly metric values for ${storeName}. Counts and revenue must be zero or higher; percentages must be from 0 to 100.` });
+    const failedReason = typeof item.failedReason === 'string' ? item.failedReason.trim().slice(0, 1000) || null : null;
+    saved.push({ report_month: `${month}-01`, store_name: storeName, online_orders: onlineOrders, live_tracking_percent: liveTrackingPercent, failed_orders: failedOrders, failed_revenue: failedRevenue, failed_percent: failedPercent, failed_reason: failedReason, created_by: req.admin.id, updated_at: now() });
+  }
+  try {
+    if (saved.length) {
+      const { error } = await db.from('delivery_report_store_monthly_metrics').upsert(saved, { onConflict: 'report_month,store_name' });
+      if (error) return deliveryReportFail(res, error, 'Could not save monthly store metrics');
+      await audit(req.admin.email || req.admin.id, 'delivery_report_store_monthly_metrics_saved', null, { month, count: saved.length });
+    }
+    res.json({ saved: saved.length });
+  } catch (error) { return deliveryReportFail(res, error, 'Could not save monthly store metrics'); }
+});
 app.get('/api/reports/bike-tracker', requireAdmin, async (req, res) => {
   const from = req.query.from;
   const to = req.query.to;
