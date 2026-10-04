@@ -51,7 +51,17 @@ function showToast(message) {
 }
 
 function parseDelimited(text) {
-  const delimiter = text.split(/\r?\n/, 1)[0].includes('\t') ? '\t' : ',';
+  const firstLine = text.split(/\r?\n/, 1)[0];
+  const separatorCounts = new Map([['\t', 0], [',', 0], [';', 0]]);
+  let quotedHeader = false;
+  for (let index = 0; index < firstLine.length; index++) {
+    const char = firstLine[index];
+    if (char === '"') {
+      if (quotedHeader && firstLine[index + 1] === '"') index++;
+      else quotedHeader = !quotedHeader;
+    } else if (!quotedHeader && separatorCounts.has(char)) separatorCounts.set(char, separatorCounts.get(char) + 1);
+  }
+  const delimiter = [...separatorCounts].sort((a, b) => b[1] - a[1])[0][0];
   const rows = [];
   let row = [], cell = '', quoted = false;
   for (let index = 0; index < text.length; index++) {
@@ -113,17 +123,30 @@ function rosterRowsFromPaste(text) {
 
 function parseNumber(value) {
   if (value == null || String(value).trim() === '') return null;
-  const normalized = String(value).replace(/,/g, '').trim();
+  const normalized = normalizeNumericText(String(value).replace(/[^\d.,+-]/g, ''));
   const match = normalized.match(/[-+]?\d+(?:\.\d+)?/);
   const parsed = match ? Number(match[0]) : NaN;
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+function normalizeNumericText(value) {
+  let normalized = value.trim();
+  const comma = normalized.lastIndexOf(',');
+  const dot = normalized.lastIndexOf('.');
+  if (comma >= 0 && dot >= 0) {
+    normalized = comma > dot ? normalized.replace(/\./g, '').replace(',', '.') : normalized.replace(/,/g, '');
+  } else if (comma >= 0) {
+    const decimals = normalized.length - comma - 1;
+    normalized = decimals > 0 && decimals <= 2 ? normalized.replace(',', '.') : normalized.replace(/,/g, '');
+  }
+  return normalized;
+}
+
 function parseValue(value) {
-  const raw = String(value || '').trim().replace(/,/g, '');
-  const match = raw.match(/^(.*?)([-+]?\d+(?:\.\d+)?)\s*$/);
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(.*?)([-+]?\d[\d.,]*)\s*$/);
   if (!match) return { currency: raw ? null : null, amount: raw ? NaN : null };
-  return { currency: match[1].trim() || 'K', amount: Number(match[2]) };
+  return { currency: match[1].trim() || 'K', amount: Number(normalizeNumericText(match[2])) };
 }
 
 function rowsFromPaste(text) {
@@ -465,6 +488,26 @@ async function boot() {
     $('#delivery-signout').addEventListener('click', async () => { await supabase.auth.signOut(); window.location.assign('/'); });
     $('#delivery-refresh').addEventListener('click', loadOrders);
     $('#data-sheet-refresh').addEventListener('click', loadOrders);
+    $('#delivery-file').addEventListener('change', async event => {
+      const file = event.currentTarget.files?.[0];
+      if (!file) return;
+      if (file.size > 100 * 1024 * 1024) {
+        $('#paste-feedback').textContent = 'Choose a CSV/TSV file smaller than 100 MB.';
+        $('#paste-feedback').style.color = '#ffac8a';
+        event.currentTarget.value = '';
+        return;
+      }
+      try {
+        $('#paste-feedback').textContent = `Reading ${file.name}…`;
+        const content = await file.text();
+        $('#delivery-paste').value = content;
+        $('#delivery-paste').dispatchEvent(new Event('input', { bubbles: true }));
+        $('#preview-paste').click();
+      } catch (error) {
+        $('#paste-feedback').textContent = `Could not read ${file.name}: ${error.message}`;
+        $('#paste-feedback').style.color = '#ffac8a';
+      } finally { event.currentTarget.value = ''; }
+    });
     $('#rider-report-month').value = monthNow();
     $('#store-target-month').value = monthNow();
     $('#rider-report-month').addEventListener('change', async event => {
