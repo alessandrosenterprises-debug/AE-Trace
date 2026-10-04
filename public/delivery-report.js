@@ -224,11 +224,11 @@ function emptyRow(span, text = 'No delivery data yet. Paste your spreadsheet in 
 function renderDashboard() {
   const names = knownStoreNames();
   const picker = $('#dashboard-store-picker');
-  const previouslySelected = [...picker.selectedOptions].map(option => option.value);
-  picker.innerHTML = names.map(name => `<option value="${esc(name)}" ${previouslySelected.includes(name) ? 'selected' : ''}>${esc(name)}</option>`).join('');
+  const previouslySelected = new Set([...picker.querySelectorAll('input:checked')].map(input => input.value));
+  picker.innerHTML = names.map((name, index) => `<label class="store-check-row store-check-tone-${index % 5}"><input type="checkbox" value="${esc(name)}" ${previouslySelected.has(name) ? 'checked' : ''}><span>${esc(name)}</span></label>`).join('') || '<span class="store-picker-empty">No stores found yet. Import order data or add riders to the roster.</span>';
   const mode = $('#dashboard-store-mode').value || 'all';
   $('#dashboard-store-picker-wrap').classList.toggle('hidden', mode === 'all');
-  const selected = [...picker.selectedOptions].map(option => option.value);
+  const selected = [...picker.querySelectorAll('input:checked')].map(input => input.value);
   const from = $('#dashboard-date-from').value || '0000-01-01';
   const to = $('#dashboard-date-to').value || '9999-12-31';
   const matchesStore = store => mode === 'all' || selected.some(name => normalizedName(name) === normalizedName(store));
@@ -660,19 +660,10 @@ async function boot() {
     listen('#data-sheet-refresh', 'click', loadOrders);
     listen('#dashboard-date-from', 'change', () => { dashboardDatesManuallyChanged = true; dashboardMetricRange = ''; renderDashboard(); loadDashboardMetrics().catch(error => showToast(error.message)); });
     listen('#dashboard-date-to', 'change', () => { dashboardDatesManuallyChanged = true; dashboardMetricRange = ''; renderDashboard(); loadDashboardMetrics().catch(error => showToast(error.message)); });
-    listen('#dashboard-store-mode', 'change', event => {
-      const picker = $('#dashboard-store-picker');
-      if (event.currentTarget.value !== 'all' && !picker.selectedOptions.length && picker.options.length) picker.options[0].selected = true;
-      if (event.currentTarget.value === 'single' && picker.selectedOptions.length > 1) [...picker.selectedOptions].slice(1).forEach(option => { option.selected = false; });
-      renderDashboard();
-    });
-    listen('#dashboard-store-picker', 'change', event => {
-      if ($('#dashboard-store-mode').value === 'single' && event.currentTarget.selectedOptions.length > 1) {
-        const latest = event.currentTarget.selectedOptions.at(-1).value;
-        [...event.currentTarget.options].forEach(option => { option.selected = option.value === latest; });
-      }
-      renderDashboard();
-    });
+    listen('#dashboard-store-mode', 'change', renderDashboard);
+    listen('#dashboard-store-picker', 'change', renderDashboard);
+    listen('#dashboard-store-select-all', 'click', () => { $('#dashboard-store-picker').querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = true; }); renderDashboard(); });
+    listen('#dashboard-store-clear', 'click', () => { $('#dashboard-store-picker').querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = false; }); renderDashboard(); });
     $('#store-report-month').value = monthNow();
     $('#store-input-month').value = monthNow();
     const today = new Date();
