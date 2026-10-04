@@ -488,7 +488,7 @@ async function boot() {
     $('#delivery-signout').addEventListener('click', async () => { await supabase.auth.signOut(); window.location.assign('/'); });
     $('#delivery-refresh').addEventListener('click', loadOrders);
     $('#data-sheet-refresh').addEventListener('click', loadOrders);
-    $('#delivery-file').addEventListener('change', async event => {
+    $('#delivery-file')?.addEventListener('change', async event => {
       const file = event.currentTarget.files?.[0];
       if (!file) return;
       if (file.size > 100 * 1024 * 1024) {
